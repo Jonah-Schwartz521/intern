@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "tauri-app",
+  "productName": "Intern",
   "version": "0.1.0",
   "identifier": "com.jonah521.tauri-app",
   "build": {
@@ -12,9 +12,10 @@
   "app": {
     "windows": [
       {
-        "title": "tauri-app",
-        "width": 800,
-        "height": 600
+        "title": "Intern",
+        "width": 480,
+        "height": 640,
+        "decorations": false
       }
     ],
     "security": {

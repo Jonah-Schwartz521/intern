@@ -280,6 +280,15 @@ function App() {
     };
   }, []);
 
+  const handleMinimize = () => {
+    getCurrentWindow().minimize();
+  };
+
+  const handleClose = () => {
+    // Hide to tray instead of quitting. Real quit lives in the tray menu.
+    getCurrentWindow().hide();
+  };
+
   const send = async () => {
     const text = input.trim();
     if (text === "") return;
@@ -304,8 +313,16 @@ function App() {
 
   return (
     <main className="container">
-      <header className="topbar">
+      <header className="titlebar" data-tauri-drag-region>
         <span className="brand">intern</span>
+        <div className="window-controls">
+          <button className="win-btn" onClick={handleMinimize} title="Minimize">
+            &#x2013;
+          </button>
+          <button className="win-btn win-close" onClick={handleClose} title="Hide to tray">
+            &#x2715;
+          </button>
+        </div>
       </header>
       <div className="history">
         {messages.length === 0 && (
