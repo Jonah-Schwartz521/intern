@@ -11,6 +11,7 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { Command } from "@tauri-apps/plugin-shell";
+import { openPath } from "@tauri-apps/plugin-opener";
 import "./App.css";
 
 const HOTKEY = "CmdOrCtrl+Shift+Space";
@@ -21,10 +22,10 @@ The current date and time is ${new Date().toString()}. Use this to resolve relat
 
 Your job:
 - Parse user intent from casual, natural-language input (typed or spoken).
-- Map intent to specific actions (calendar create, reminder set, file search, transcription).
+- Map intent to specific actions (calendar create, reminder set, file search, file open, transcription).
 - Provide clear, concise responses or ask clarifying questions when ambiguous.
-- Keep responses conversational and brief (one or two sentences).
 - When you search files and find results, list the top matches with their paths concisely.
+- When the user asks to open a file you found earlier, call open_file with that exact path.
 - Never assume file paths or calendar details; ask if unclear.
 - Act like a sharp junior assistant: fast, low-friction, no over-explaining.`;
 
@@ -63,6 +64,22 @@ const TOOLS = [
         },
       },
       required: ["query"],
+    },
+  },
+  {
+    name: "open_file",
+    description:
+      "Open a file or folder in its default application. Use when the user asks to open a file, usually one found by a previous search. Provide the full path.",
+    input_schema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description:
+            "The full absolute path to the file to open, e.g. 'C:\\\\Users\\\\Jonah\\\\Documents\\\\resume.pdf'.",
+        },
+      },
+      required: ["path"],
     },
   },
 ];
@@ -106,11 +123,9 @@ async function scheduleReminderTask(text: string, due: Date): Promise<string> {
   return taskName;
 }
 
-// Search filenames under the user's home directory for a query string.
 async function searchFiles(query: string): Promise<string> {
   const safeQuery = query.replace(/'/g, "").slice(0, 100);
 
-  // Search $HOME recursively, match filenames containing the query, cap results.
   const script =
     `Get-ChildItem -Path $HOME -Recurse -File -ErrorAction SilentlyContinue ` +
     `-Filter '*${safeQuery}*' | Select-Object -First 15 -ExpandProperty FullName`;
@@ -170,6 +185,15 @@ async function runTool(name: string, input: any): Promise<string> {
       return await searchFiles(input.query);
     } catch (e) {
       return `Search failed: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
+  if (name === "open_file") {
+    try {
+      await openPath(input.path);
+      return `Opened: ${input.path}`;
+    } catch (e) {
+      return `Could not open the file: ${e instanceof Error ? e.message : String(e)}`;
     }
   }
 

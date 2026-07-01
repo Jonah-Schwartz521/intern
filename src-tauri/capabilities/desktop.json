@@ -19,6 +19,12 @@
     "core:window:allow-is-visible",
     "notification:default",
     {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        { "path": "**" }
+      ]
+    },
+    {
       "identifier": "shell:allow-execute",
       "allow": [
         {
