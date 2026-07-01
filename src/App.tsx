@@ -14,9 +14,35 @@ type Message = {
   text: string;
 };
 
+async function askClaude(userText: string): Promise<string> {
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": import.meta.env.VITE_ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 1024,
+      messages: [{ role: "user", content: userText }],
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`API ${response.status}: ${err}`);
+  }
+
+  const data = await response.json();
+  return data.content[0].text;
+}
+
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  const [thinking, setThinking] = useState(false);
 
   useEffect(() => {
     const setup = async () => {
@@ -38,16 +64,31 @@ function App() {
     };
   }, []);
 
-  const send = () => {
-    if (input.trim() === "") return;
-    setMessages([...messages, { role: "user", text: input }]);
+  const send = async () => {
+    const text = input.trim();
+    if (text === "") return;
+
+    setMessages((prev) => [...prev, { role: "user", text }]);
     setInput("");
+    setThinking(true);
+
+    try {
+      const reply = await askClaude(text);
+      setMessages((prev) => [...prev, { role: "intern", text: reply }]);
+    } catch (e) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "intern", text: `Error: ${e instanceof Error ? e.message : String(e)}` },
+      ]);
+    } finally {
+      setThinking(false);
+    }
   };
 
   return (
     <main className="container">
       <header className="topbar">
-        <span className="brand">Intern</span>
+        <span className="brand">intern</span>
       </header>
       <div className="history">
         {messages.length === 0 && (
@@ -58,6 +99,7 @@ function App() {
             {msg.text}
           </div>
         ))}
+        {thinking && <div className="message intern thinking">...</div>}
       </div>
       <input
         className="input"

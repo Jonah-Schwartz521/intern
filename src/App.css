@@ -113,3 +113,7 @@ body {
   background: var(--border);
   border-radius: 4px;
 }
+.message.thinking {
+  color: var(--text-dim);
+  font-style: italic;
+}

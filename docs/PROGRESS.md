@@ -8,7 +8,7 @@ Living log of what is built and what is next. Update at the end of every session
 
 - [x] Scaffold Tauri app (create-tauri-app, Vue or React + TS)
 - [x] Register global hotkey (global-shortcut plugin) + window summoning
-- [ ] Minimal chat UI (input + history)
+- [x] Minimal chat UI (input + history)
 - [ ] Claude API client wired (HTTP) + intent routing
 - [ ] Intent parsing: calendar create
 - [ ] Intent parsing: reminder set
