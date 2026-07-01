@@ -25,7 +25,12 @@ type Message = {
   text: string;
 };
 
-async function askClaude(userText: string): Promise<string> {
+async function askClaude(history: Message[]): Promise<string> {
+  const apiMessages = history.map((m) => ({
+    role: m.role === "intern" ? "assistant" : "user",
+    content: m.text,
+  }));
+
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -38,7 +43,7 @@ async function askClaude(userText: string): Promise<string> {
       model: "claude-haiku-4-5-20251001",
       max_tokens: 1024,
       system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userText }],
+      messages: apiMessages,
     }),
   });
 
@@ -80,12 +85,13 @@ function App() {
     const text = input.trim();
     if (text === "") return;
 
-    setMessages((prev) => [...prev, { role: "user", text }]);
+    const newHistory: Message[] = [...messages, { role: "user", text }];
+    setMessages(newHistory);
     setInput("");
     setThinking(true);
 
     try {
-      const reply = await askClaude(text);
+      const reply = await askClaude(newHistory);
       setMessages((prev) => [...prev, { role: "intern", text: reply }]);
     } catch (e) {
       setMessages((prev) => [
