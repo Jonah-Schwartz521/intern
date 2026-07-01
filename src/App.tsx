@@ -5,6 +5,11 @@ import {
   ShortcutEvent,
 } from "@tauri-apps/plugin-global-shortcut";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
 import "./App.css";
 
 const HOTKEY = "CmdOrCtrl+Shift+Space";
@@ -20,40 +25,105 @@ Your job:
 - Never assume file paths or calendar details; ask if unclear.
 - Act like a sharp junior assistant: fast, low-friction, no over-explaining.`;
 
+const TOOLS = [
+  {
+    name: "create_reminder",
+    description:
+      "Create a reminder for the user. Use whenever the user asks to be reminded of something.",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+          description: "What to remind the user about, e.g. 'call the dentist'",
+        },
+        when: {
+          type: "string",
+          description:
+            "When to remind, in natural language, e.g. 'next Tuesday', 'tomorrow at 3pm'",
+        },
+      },
+      required: ["text", "when"],
+    },
+  },
+];
+
 type Message = {
   role: "user" | "intern";
   text: string;
 };
 
+async function runTool(name: string, input: any): Promise<string> {
+  if (name === "create_reminder") {
+    let granted = await isPermissionGranted();
+    if (!granted) {
+      const perm = await requestPermission();
+      granted = perm === "granted";
+    }
+    if (granted) {
+      sendNotification({
+        title: "Reminder set",
+        body: `${input.text} (${input.when})`,
+      });
+    }
+    return `Reminder created: "${input.text}" for ${input.when}.`;
+  }
+  return `Unknown tool: ${name}`;
+}
+
 async function askClaude(history: Message[]): Promise<string> {
-  const apiMessages = history.map((m) => ({
+  const apiMessages: any[] = history.map((m) => ({
     role: m.role === "intern" ? "assistant" : "user",
     content: m.text,
   }));
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": import.meta.env.VITE_ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 1024,
-      system: SYSTEM_PROMPT,
-      messages: apiMessages,
-    }),
-  });
+  while (true) {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": import.meta.env.VITE_ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 1024,
+        system: SYSTEM_PROMPT,
+        tools: TOOLS,
+        messages: apiMessages,
+      }),
+    });
 
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`API ${response.status}: ${err}`);
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`API ${response.status}: ${err}`);
+    }
+
+    const data = await response.json();
+
+    if (data.stop_reason === "tool_use") {
+      apiMessages.push({ role: "assistant", content: data.content });
+
+      const toolResults = [];
+      for (const block of data.content) {
+        if (block.type === "tool_use") {
+          const result = await runTool(block.name, block.input);
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: block.id,
+            content: result,
+          });
+        }
+      }
+
+      apiMessages.push({ role: "user", content: toolResults });
+      continue;
+    }
+
+    const textBlock = data.content.find((b: any) => b.type === "text");
+    return textBlock ? textBlock.text : "(no response)";
   }
-
-  const data = await response.json();
-  return data.content[0].text;
 }
 
 function App() {
