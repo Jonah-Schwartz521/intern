@@ -56,7 +56,7 @@ Understand what the user actually wants, even when phrased casually or ambiguous
 
 ## UI / UX Constraints
 
-- Hotkey triggered (e.g. Ctrl+Shift+I or Cmd+Shift+I), registered via the Tauri global-shortcut plugin
+- Hotkey triggered (e.g. Ctrl+Shift+Space or Cmd+Shift+Space), registered via the Tauri global-shortcut plugin
 - Minimal chrome: chat-style interface, no modals or complex navigation
 - Input field + chat history + a mic button for voice + a transcribe button for files
 - Quick response time (cloud LLM handles heavy lifting; local layer stays snappy)

@@ -9,8 +9,7 @@ Decisions, rationale, blockers, and open questions. The point of this file is so
    Status: UNRESOLVED.
 
 2. **Target OS first: Windows or Mac.**
-   Screenshots suggest Windows is the primary machine. Pick one to build and test against first, since hotkey registration, file paths, and reminders differ per OS. Note: Tauri uses the OS-native webview (WebView2 on Windows), so going Windows-first avoids cross-webview rendering surprises.
-   Status: leaning Windows, UNCONFIRMED.
+   Status: RESOLVED (dev-side). Windows-first confirmed. Building and testing on Windows-native toolchain at C:\dev\intern.
 
 3. **Calendar provider: Google Calendar or Outlook.**
    Determines the first real integration and the OAuth flow. Pick the one tied to the calendar you actually live in.
@@ -29,6 +28,9 @@ Decisions, rationale, blockers, and open questions. The point of this file is so
 - **Architecture.** Single Claude call that routes intent to start. No internal sub-agents until the loop works. Orchestration lives in the frontend; reach into Rust only if a plugin genuinely cannot do the job.
 - **LLM model routing + caching.** Use a smart model cost-effectively rather than picking a cheap-everything model. Default routine intent parsing to Haiku 4.5; escalate to Opus 4.8 only for ambiguous, multi-step, or context-heavy requests. Cache the static system prompt (instructions + tool definitions) so repeated input bills at the cache-read rate. Keep the model behind a thin abstraction (config value, not hardcoded). No Batch API (it is async, Intern is real-time). Estimated cost at ~50 commands/day: roughly $2/month routed, ~$16/month if everything went through Opus. Rationale: intent parsing is mostly classification/extraction, which the cheap tier handles well; Opus is reserved for the requests that justify it.
 - **Transcription: local whisper.cpp.** Run transcription on-device via whisper.cpp instead of a paid per-minute API. Zero per-minute cost, works offline, private. Pipeline: ffmpeg extracts audio -> whisper.cpp transcribes -> text. Shelled out from Tauri like ffmpeg. Optional cloud fallback (e.g. Groq Whisper) can be added later, not MVP. This was the cost line item that actually mattered (audio is billed per minute), so removing it removes the only real recurring cost.
+
+- **Hotkey: Ctrl+Shift+Space.** Changed from the originally-planned Ctrl+Shift+I because Ctrl+Shift+I collides with the webview DevTools shortcut in dev mode (pressing it opened DevTools instead of firing the global shortcut). Space is clean, one-handed, no collision. Registered via CmdOrCtrl+Shift+Space in code (CmdOrCtrl resolves to Ctrl on Windows). NOTE: update NORTH_STAR.md, which still lists Ctrl+Shift+I.
+- **Dev environment: Windows-native only.** Project lives at C:\dev\intern. A duplicate copy existed under WSL (\\wsl.localhost\Ubuntu\...) and caused repeated failures: Windows npm choking on Linux paths (EISDIR/EPERM), CMD rejecting UNC paths, stale edits landing in the wrong copy. WSL copy deleted. Rule: only ever work from PS C:\dev\intern>, never a wsl.localhost path. Partially resolves the "target OS first" open question (committed to Windows-first dev).
 
 ## Blockers / Gotchas
 

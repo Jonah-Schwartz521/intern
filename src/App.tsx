@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   register,
   unregister,
@@ -9,15 +9,21 @@ import "./App.css";
 
 const HOTKEY = "CmdOrCtrl+Shift+Space";
 
+type Message = {
+  role: "user" | "intern";
+  text: string;
+};
+
 function App() {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
+
   useEffect(() => {
     const setup = async () => {
       await register(HOTKEY, async (event: ShortcutEvent) => {
         if (event.state !== "Pressed") return;
-
         const appWindow = getCurrentWindow();
         const visible = await appWindow.isVisible();
-
         if (visible) {
           await appWindow.hide();
         } else {
@@ -27,16 +33,42 @@ function App() {
       });
     };
     setup();
-
     return () => {
       unregister(HOTKEY);
     };
   }, []);
 
+  const send = () => {
+    if (input.trim() === "") return;
+    setMessages([...messages, { role: "user", text: input }]);
+    setInput("");
+  };
+
   return (
     <main className="container">
-      <h1>Intern</h1>
-      <p>Press Ctrl+Shift+Space to toggle.</p>
+      <header className="topbar">
+        <span className="brand">Intern</span>
+      </header>
+      <div className="history">
+        {messages.length === 0 && (
+          <div className="empty">Ask Intern to do something.</div>
+        )}
+        {messages.map((msg, i) => (
+          <div key={i} className={`message ${msg.role}`}>
+            {msg.text}
+          </div>
+        ))}
+      </div>
+      <input
+        className="input"
+        value={input}
+        onChange={(e) => setInput(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") send();
+        }}
+        placeholder="Ask Intern..."
+        autoFocus
+      />
     </main>
   );
 }
