@@ -9,6 +9,17 @@ import "./App.css";
 
 const HOTKEY = "CmdOrCtrl+Shift+Space";
 
+const SYSTEM_PROMPT = `You are Intern, the reasoning engine behind a desktop quick-task assistant.
+
+Your job:
+- Parse user intent from casual, natural-language input (typed or spoken).
+- Map intent to specific actions (calendar create, reminder set, file search, transcription).
+- Provide clear, concise responses or ask clarifying questions when ambiguous.
+- Suggest proactive actions when you have calendar context.
+- Keep responses conversational and brief (one or two sentences).
+- Never assume file paths or calendar details; ask if unclear.
+- Act like a sharp junior assistant: fast, low-friction, no over-explaining.`;
+
 type Message = {
   role: "user" | "intern";
   text: string;
@@ -26,6 +37,7 @@ async function askClaude(userText: string): Promise<string> {
     body: JSON.stringify({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 1024,
+      system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userText }],
     }),
   });
