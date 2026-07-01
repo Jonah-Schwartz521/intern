@@ -10,6 +10,7 @@ import {
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
+import { Command } from "@tauri-apps/plugin-shell";
 import "./App.css";
 
 const HOTKEY = "CmdOrCtrl+Shift+Space";
@@ -54,6 +55,42 @@ type Message = {
   text: string;
 };
 
+// Schedule a Windows Task that shows a message at `due`, surviving app close.
+async function scheduleReminderTask(text: string, due: Date): Promise<string> {
+  const taskName = `InternReminder_${due.getTime()}`;
+
+  const hh = String(due.getHours()).padStart(2, "0");
+  const mm = String(due.getMinutes()).padStart(2, "0");
+  const startTime = `${hh}:${mm}`;
+  const startDate = `${String(due.getMonth() + 1).padStart(2, "0")}/${String(
+    due.getDate()
+  ).padStart(2, "0")}/${due.getFullYear()}`;
+
+  // msg needs a short payload; strip quotes to avoid breaking the /tr string.
+  const safeText = text.replace(/"/g, "").slice(0, 200);
+  const trCommand = `msg * ${safeText}`;
+
+  const out = await Command.create("schtasks", [
+    "/create",
+    "/tn",
+    taskName,
+    "/tr",
+    trCommand,
+    "/sc",
+    "once",
+    "/st",
+    startTime,
+    "/sd",
+    startDate,
+    "/f",
+  ]).execute();
+
+  if (out.code !== 0) {
+    throw new Error(`schtasks failed (code ${out.code}): ${out.stderr}`);
+  }
+  return taskName;
+}
+
 async function fireNotification(text: string) {
   let granted = await isPermissionGranted();
   if (!granted) {
@@ -69,23 +106,22 @@ async function runTool(name: string, input: any): Promise<string> {
   if (name === "create_reminder") {
     const due = new Date(input.due_iso);
     const now = new Date();
-    const delayMs = due.getTime() - now.getTime();
 
     if (isNaN(due.getTime())) {
       return `Could not understand the time "${input.due_iso}".`;
     }
 
-    if (delayMs <= 0) {
+    if (due.getTime() <= now.getTime()) {
       await fireNotification(input.text);
       return `That time has passed, so I reminded you now: "${input.text}".`;
     }
 
-    // Schedule it. NOTE: only fires while the app is running.
-    setTimeout(() => {
-      fireNotification(input.text);
-    }, delayMs);
-
-    return `Reminder set: "${input.text}" for ${due.toLocaleString()}.`;
+    try {
+      await scheduleReminderTask(input.text, due);
+      return `Reminder scheduled: "${input.text}" for ${due.toLocaleString()}. It will fire even if Intern is closed.`;
+    } catch (e) {
+      return `Could not schedule the reminder: ${e instanceof Error ? e.message : String(e)}`;
+    }
   }
   return `Unknown tool: ${name}`;
 }
@@ -145,6 +181,21 @@ async function askClaude(history: Message[]): Promise<string> {
   }
 }
 
+// TEMPORARY Stage 2 test: schedule a message 2 minutes from now.
+async function testScheduled() {
+  try {
+    const due = new Date(Date.now() + 2 * 60 * 1000);
+    const taskName = await scheduleReminderTask("Stage 2 test reminder fired", due);
+    alert(
+      `Scheduled "${taskName}" for ${due.toLocaleTimeString()}.\n\n` +
+        `Now QUIT Intern (tray > Quit) and wait ~2 min. The message should fire anyway.`
+    );
+  } catch (e) {
+    console.error(e);
+    alert(`Schedule FAILED: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -196,6 +247,9 @@ function App() {
     <main className="container">
       <header className="topbar">
         <span className="brand">intern</span>
+        <button onClick={testScheduled} style={{ marginLeft: "auto", fontSize: "11px" }}>
+          Test scheduled (2min)
+        </button>
       </header>
       <div className="history">
         {messages.length === 0 && (

@@ -17,6 +17,16 @@
     "core:window:allow-show",
     "core:window:allow-set-focus",
     "core:window:allow-is-visible",
-    "notification:default"
+    "notification:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "schtasks",
+          "cmd": "schtasks",
+          "args": true
+        }
+      ]
+    }
   ]
 }
