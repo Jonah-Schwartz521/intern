@@ -25,6 +25,11 @@
           "name": "schtasks",
           "cmd": "schtasks",
           "args": true
+        },
+        {
+          "name": "powershell",
+          "cmd": "powershell",
+          "args": true
         }
       ]
     }

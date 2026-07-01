@@ -24,6 +24,7 @@ Your job:
 - Map intent to specific actions (calendar create, reminder set, file search, transcription).
 - Provide clear, concise responses or ask clarifying questions when ambiguous.
 - Keep responses conversational and brief (one or two sentences).
+- When you search files and find results, list the top matches with their paths concisely.
 - Never assume file paths or calendar details; ask if unclear.
 - Act like a sharp junior assistant: fast, low-friction, no over-explaining.`;
 
@@ -48,6 +49,22 @@ const TOOLS = [
       required: ["text", "due_iso"],
     },
   },
+  {
+    name: "search_files",
+    description:
+      "Search the user's files by name. Use when the user wants to find a file, document, or folder. Returns matching file paths.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description:
+            "A word or partial filename to search for, e.g. 'medtronic', 'resume', 'budget'. Matches filenames containing this text.",
+        },
+      },
+      required: ["query"],
+    },
+  },
 ];
 
 type Message = {
@@ -55,7 +72,6 @@ type Message = {
   text: string;
 };
 
-// Schedule a Windows Task that shows a message at `due`, surviving app close.
 async function scheduleReminderTask(text: string, due: Date): Promise<string> {
   const taskName = `InternReminder_${due.getTime()}`;
 
@@ -90,6 +106,32 @@ async function scheduleReminderTask(text: string, due: Date): Promise<string> {
   return taskName;
 }
 
+// Search filenames under the user's home directory for a query string.
+async function searchFiles(query: string): Promise<string> {
+  const safeQuery = query.replace(/'/g, "").slice(0, 100);
+
+  // Search $HOME recursively, match filenames containing the query, cap results.
+  const script =
+    `Get-ChildItem -Path $HOME -Recurse -File -ErrorAction SilentlyContinue ` +
+    `-Filter '*${safeQuery}*' | Select-Object -First 15 -ExpandProperty FullName`;
+
+  const out = await Command.create("powershell", [
+    "-NoProfile",
+    "-Command",
+    script,
+  ]).execute();
+
+  if (out.code !== 0) {
+    return `Search failed: ${out.stderr}`;
+  }
+
+  const results = out.stdout.trim();
+  if (results === "") {
+    return `No files found matching "${query}".`;
+  }
+  return `Found these files:\n${results}`;
+}
+
 async function fireNotification(text: string) {
   let granted = await isPermissionGranted();
   if (!granted) {
@@ -110,7 +152,6 @@ async function runTool(name: string, input: any): Promise<string> {
       return `Could not understand the time "${input.due_iso}".`;
     }
 
-    // Time already passed: remind immediately instead of scheduling in the past.
     if (due.getTime() <= now.getTime()) {
       await fireNotification(input.text);
       return `That time has passed, so I reminded you now: "${input.text}".`;
@@ -123,6 +164,15 @@ async function runTool(name: string, input: any): Promise<string> {
       return `Could not schedule the reminder: ${e instanceof Error ? e.message : String(e)}`;
     }
   }
+
+  if (name === "search_files") {
+    try {
+      return await searchFiles(input.query);
+    } catch (e) {
+      return `Search failed: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
   return `Unknown tool: ${name}`;
 }
 
