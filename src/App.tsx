@@ -66,7 +66,6 @@ async function scheduleReminderTask(text: string, due: Date): Promise<string> {
     due.getDate()
   ).padStart(2, "0")}/${due.getFullYear()}`;
 
-  // msg needs a short payload; strip quotes to avoid breaking the /tr string.
   const safeText = text.replace(/"/g, "").slice(0, 200);
   const trCommand = `msg * ${safeText}`;
 
@@ -111,6 +110,7 @@ async function runTool(name: string, input: any): Promise<string> {
       return `Could not understand the time "${input.due_iso}".`;
     }
 
+    // Time already passed: remind immediately instead of scheduling in the past.
     if (due.getTime() <= now.getTime()) {
       await fireNotification(input.text);
       return `That time has passed, so I reminded you now: "${input.text}".`;
@@ -181,21 +181,6 @@ async function askClaude(history: Message[]): Promise<string> {
   }
 }
 
-// TEMPORARY Stage 2 test: schedule a message 2 minutes from now.
-async function testScheduled() {
-  try {
-    const due = new Date(Date.now() + 2 * 60 * 1000);
-    const taskName = await scheduleReminderTask("Stage 2 test reminder fired", due);
-    alert(
-      `Scheduled "${taskName}" for ${due.toLocaleTimeString()}.\n\n` +
-        `Now QUIT Intern (tray > Quit) and wait ~2 min. The message should fire anyway.`
-    );
-  } catch (e) {
-    console.error(e);
-    alert(`Schedule FAILED: ${e instanceof Error ? e.message : String(e)}`);
-  }
-}
-
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -247,9 +232,6 @@ function App() {
     <main className="container">
       <header className="topbar">
         <span className="brand">intern</span>
-        <button onClick={testScheduled} style={{ marginLeft: "auto", fontSize: "11px" }}>
-          Test scheduled (2min)
-        </button>
       </header>
       <div className="history">
         {messages.length === 0 && (
