@@ -16,11 +16,12 @@ const HOTKEY = "CmdOrCtrl+Shift+Space";
 
 const SYSTEM_PROMPT = `You are Intern, the reasoning engine behind a desktop quick-task assistant.
 
+The current date and time is ${new Date().toString()}. Use this to resolve relative times like "tomorrow at 3pm" into exact timestamps.
+
 Your job:
 - Parse user intent from casual, natural-language input (typed or spoken).
 - Map intent to specific actions (calendar create, reminder set, file search, transcription).
 - Provide clear, concise responses or ask clarifying questions when ambiguous.
-- Suggest proactive actions when you have calendar context.
 - Keep responses conversational and brief (one or two sentences).
 - Never assume file paths or calendar details; ask if unclear.
 - Act like a sharp junior assistant: fast, low-friction, no over-explaining.`;
@@ -37,13 +38,13 @@ const TOOLS = [
           type: "string",
           description: "What to remind the user about, e.g. 'call the dentist'",
         },
-        when: {
+        due_iso: {
           type: "string",
           description:
-            "When to remind, in natural language, e.g. 'next Tuesday', 'tomorrow at 3pm'",
+            "The exact time to fire the reminder, as an ISO 8601 timestamp, e.g. '2026-07-01T15:00:00'. Compute this from the user's request and the current date/time.",
         },
       },
-      required: ["text", "when"],
+      required: ["text", "due_iso"],
     },
   },
 ];
@@ -53,20 +54,38 @@ type Message = {
   text: string;
 };
 
+async function fireNotification(text: string) {
+  let granted = await isPermissionGranted();
+  if (!granted) {
+    const perm = await requestPermission();
+    granted = perm === "granted";
+  }
+  if (granted) {
+    sendNotification({ title: "Intern reminder", body: text });
+  }
+}
+
 async function runTool(name: string, input: any): Promise<string> {
   if (name === "create_reminder") {
-    let granted = await isPermissionGranted();
-    if (!granted) {
-      const perm = await requestPermission();
-      granted = perm === "granted";
+    const due = new Date(input.due_iso);
+    const now = new Date();
+    const delayMs = due.getTime() - now.getTime();
+
+    if (isNaN(due.getTime())) {
+      return `Could not understand the time "${input.due_iso}".`;
     }
-    if (granted) {
-      sendNotification({
-        title: "Reminder set",
-        body: `${input.text} (${input.when})`,
-      });
+
+    if (delayMs <= 0) {
+      await fireNotification(input.text);
+      return `That time has passed, so I reminded you now: "${input.text}".`;
     }
-    return `Reminder created: "${input.text}" for ${input.when}.`;
+
+    // Schedule it. NOTE: only fires while the app is running.
+    setTimeout(() => {
+      fireNotification(input.text);
+    }, delayMs);
+
+    return `Reminder set: "${input.text}" for ${due.toLocaleString()}.`;
   }
   return `Unknown tool: ${name}`;
 }
