@@ -16,6 +16,9 @@ import "./App.css";
 
 const HOTKEY = "CmdOrCtrl+Shift+Space";
 
+const HAIKU = "claude-haiku-4-5-20251001";
+const OPUS = "claude-opus-4-8";
+
 const SYSTEM_PROMPT = `You are Intern, the reasoning engine behind a desktop quick-task assistant.
 
 The current date and time is ${new Date().toString()}. Use this to resolve relative times like "tomorrow at 3pm" into exact timestamps.
@@ -88,6 +91,25 @@ type Message = {
   role: "user" | "intern";
   text: string;
 };
+
+// Simple heuristic: pick Opus only for requests that look genuinely hard.
+// No extra API call, instant, free. Crude on purpose.
+function pickModel(userText: string): string {
+  const t = userText.toLowerCase();
+  const longish = userText.length > 240;
+  const multiStep =
+    t.includes(" and then ") ||
+    t.includes(" after that ") ||
+    t.includes(" first ") ||
+    (t.match(/,/g) || []).length >= 3;
+  const reasoningWords =
+    t.includes("compare") ||
+    t.includes("analyze") ||
+    t.includes("figure out") ||
+    t.includes("which should") ||
+    t.includes("plan ");
+  return longish || multiStep || reasoningWords ? OPUS : HAIKU;
+}
 
 async function scheduleReminderTask(text: string, due: Date): Promise<string> {
   const taskName = `InternReminder_${due.getTime()}`;
@@ -206,6 +228,10 @@ async function askClaude(history: Message[]): Promise<string> {
     content: m.text,
   }));
 
+  // Route based on the latest user message.
+  const lastUser = [...history].reverse().find((m) => m.role === "user");
+  const model = pickModel(lastUser ? lastUser.text : "");
+
   while (true) {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -216,9 +242,15 @@ async function askClaude(history: Message[]): Promise<string> {
         "anthropic-dangerous-direct-browser-access": "true",
       },
       body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
+        model: model,
         max_tokens: 1024,
-        system: SYSTEM_PROMPT,
+        system: [
+          {
+            type: "text",
+            text: SYSTEM_PROMPT,
+            cache_control: { type: "ephemeral" },
+          },
+        ],
         tools: TOOLS,
         messages: apiMessages,
       }),
@@ -285,7 +317,6 @@ function App() {
   };
 
   const handleClose = () => {
-    // Hide to tray instead of quitting. Real quit lives in the tray menu.
     getCurrentWindow().hide();
   };
 
