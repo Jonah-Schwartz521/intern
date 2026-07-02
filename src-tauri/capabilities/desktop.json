@@ -23,7 +23,9 @@
     {
       "identifier": "opener:allow-open-path",
       "allow": [
-        { "path": "**" }
+        {
+          "path": "**"
+        }
       ]
     },
     {
@@ -40,6 +42,7 @@
           "args": true
         }
       ]
-    }
+    },
+    "autostart:default"
   ]
 }

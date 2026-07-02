@@ -12,6 +12,7 @@ import {
 } from "@tauri-apps/plugin-notification";
 import { Command } from "@tauri-apps/plugin-shell";
 import { openPath } from "@tauri-apps/plugin-opener";
+import { enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import "./App.css";
 
 const HOTKEY = "CmdOrCtrl+Shift+Space";
@@ -92,8 +93,6 @@ type Message = {
   text: string;
 };
 
-// Simple heuristic: pick Opus only for requests that look genuinely hard.
-// No extra API call, instant, free. Crude on purpose.
 function pickModel(userText: string): string {
   const t = userText.toLowerCase();
   const longish = userText.length > 240;
@@ -228,7 +227,6 @@ async function askClaude(history: Message[]): Promise<string> {
     content: m.text,
   }));
 
-  // Route based on the latest user message.
   const lastUser = [...history].reverse().find((m) => m.role === "user");
   const model = pickModel(lastUser ? lastUser.text : "");
 
@@ -305,6 +303,15 @@ function App() {
           await appWindow.setFocus();
         }
       });
+
+      // Enable launch-at-startup once (no-op if already enabled).
+      try {
+        if (!(await isEnabled())) {
+          await enable();
+        }
+      } catch (e) {
+        console.error("autostart setup failed:", e);
+      }
     };
     setup();
     return () => {
