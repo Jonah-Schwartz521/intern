@@ -13,7 +13,9 @@ Living log of what is built and what is next. Update at the end of every session
 - [ ] Intent parsing: calendar create
 - [ ] Intent parsing: reminder set
 - [ ] Intent parsing: file search
-- [ ] Calendar API read access
+- [~] Outlook auth (Microsoft Graph, PKCE) — code complete, pending live login test
+- [ ] Calendar API read access (list_events)
+- [ ] Calendar API write access (create_event)
 - [ ] Voice input (mic -> speech-to-text -> intent)
 - [ ] Audio file transcription
 - [ ] Video transcription (ffmpeg via shell plugin -> speech-to-text)
@@ -26,9 +28,9 @@ Living log of what is built and what is next. Update at the end of every session
 
 ## Next Up
 
-1. Commit + push the hotkey work (uncommitted as of this session)
-2. Build the minimal chat UI: scrollable history + bottom input, copper/dark theme (#c07840 on near-black, monospace). Pure frontend, no Rust.
-3. Wire the Claude API client (HTTP) + basic intent routing
+1. Test Outlook login: `npm run tauri dev`, click "Connect Outlook", complete browser sign-in, confirm token logs to console. (First run downloads 3 new Rust crates.)
+2. Once login verified: add `list_events` tool (Graph calendarview).
+3. Then `create_event` tool (Graph POST /me/events), and remove the temporary Connect Outlook button.
 
 ## Notes / Blockers
 

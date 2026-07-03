@@ -24,6 +24,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-notification = "2"
 tauri-plugin-shell = "2"
+# unsafe-headers lets us strip the Origin header that the plugin otherwise
+# injects from the webview URL. Microsoft's /token endpoint rejects any request
+# carrying Origin (AADSTS90023, cross-origin token redemption). Sending Origin: ""
+# from JS, with this feature on, makes the plugin drop the header entirely.
+tauri-plugin-http = { version = "2", features = ["unsafe-headers"] }
+tauri-plugin-store = "2"
+tauri-plugin-oauth = "2"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-autostart = "2"

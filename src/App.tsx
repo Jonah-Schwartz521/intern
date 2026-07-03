@@ -13,6 +13,8 @@ import {
 import { Command } from "@tauri-apps/plugin-shell";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { enable, isEnabled } from "@tauri-apps/plugin-autostart";
+import { login, getValidAccessToken } from "./msauth";
+import { listEvents, createEvent, deleteEvent, updateEvent, debugWhoAmI } from "./calendar";
 import "./App.css";
 
 const HOTKEY = "CmdOrCtrl+Shift+Space";
@@ -31,6 +33,9 @@ Your job:
 - When you search files and find results, list the top matches with their paths concisely.
 - When the user asks to open a file you found earlier, call open_file with that exact path.
 - Never assume file paths or calendar details; ask if unclear.
+- Before creating a calendar event, resolve the exact date. If the user names a vague day like "Friday" without saying which week, or gives a time that has already passed relative to the current date/time, do NOT call create_event yet. Ask a clarifying question first, e.g. "It's already past noon today, did you mean next Friday?" Confirm the actual date before booking, and never silently assume "today" or guess the week.
+- To update or delete an event you must first find it with list_events. Each event it returns includes an internal id in brackets like [id:...]. Use that id for update_event and delete_event, but never show the id to the user; it is for your use only.
+- Before deleting an event, ALWAYS confirm with the user exactly which event you will delete (by name and time) and wait for their yes. Never call delete_event on a guess or without explicit confirmation.
 - Act like a sharp junior assistant: fast, low-friction, no over-explaining.`;
 
 const TOOLS = [
@@ -84,6 +89,103 @@ const TOOLS = [
         },
       },
       required: ["path"],
+    },
+  },
+  {
+    name: "list_events",
+    description:
+      "List the user's Outlook calendar events. Use when the user asks what's on their calendar, their schedule, or upcoming events. Defaults to today through the next 7 days if no range is given.",
+    input_schema: {
+      type: "object",
+      properties: {
+        start_iso: {
+          type: "string",
+          description:
+            "Optional start of the range as an ISO 8601 timestamp, e.g. '2026-07-03T00:00:00'. Defaults to the start of today. Compute from the user's request and the current date/time.",
+        },
+        end_iso: {
+          type: "string",
+          description:
+            "Optional end of the range as an ISO 8601 timestamp. Defaults to 7 days after the start.",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "create_event",
+    description:
+      "Create an event on the user's Outlook calendar. Use when the user asks to add, schedule, or put something on their calendar. Compute start and end from the request and the current date/time, the same way reminders are computed.",
+    input_schema: {
+      type: "object",
+      properties: {
+        subject: {
+          type: "string",
+          description: "Title of the event, e.g. 'Lunch with Sam'.",
+        },
+        start_iso: {
+          type: "string",
+          description:
+            "Event start as an ISO 8601 timestamp, e.g. '2026-07-10T12:00:00'. Compute from the user's request and the current date/time.",
+        },
+        end_iso: {
+          type: "string",
+          description:
+            "Event end as an ISO 8601 timestamp. If the user gives only a start time, default to one hour after the start.",
+        },
+        location: {
+          type: "string",
+          description: "Optional location or meeting place.",
+        },
+        attendees: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional list of attendee email addresses to invite.",
+        },
+      },
+      required: ["subject", "start_iso", "end_iso"],
+    },
+  },
+  {
+    name: "update_event",
+    description:
+      "Update an existing Outlook calendar event: reschedule (change start/end), rename (subject), or relocate (location). Requires the event id from a prior list_events result. Only include the fields that change.",
+    input_schema: {
+      type: "object",
+      properties: {
+        event_id: {
+          type: "string",
+          description: "The id of the event to update, from a prior list_events result.",
+        },
+        subject: { type: "string", description: "New title, if renaming." },
+        start_iso: {
+          type: "string",
+          description:
+            "New start as an ISO 8601 timestamp, if rescheduling. Compute from the request and the current date/time.",
+        },
+        end_iso: {
+          type: "string",
+          description:
+            "New end as an ISO 8601 timestamp, if rescheduling. Default to one hour after the start if only a start is given.",
+        },
+        location: { type: "string", description: "New location, if relocating." },
+      },
+      required: ["event_id"],
+    },
+  },
+  {
+    name: "delete_event",
+    description:
+      "Delete an event from the user's Outlook calendar. Requires the event id from a prior list_events result. Only call this after the user has explicitly confirmed which event to delete; never on a guess.",
+    input_schema: {
+      type: "object",
+      properties: {
+        event_id: {
+          type: "string",
+          description: "The id of the event to delete, from a prior list_events result.",
+        },
+      },
+      required: ["event_id"],
     },
   },
 ];
@@ -218,6 +320,62 @@ async function runTool(name: string, input: any): Promise<string> {
     }
   }
 
+  if (name === "list_events") {
+    try {
+      const events = await listEvents(input.start_iso, input.end_iso);
+      if (events.length === 0) return "No events found in that range.";
+      const lines = events.map((e) => {
+        const when =
+          e.isAllDay && e.end && e.end !== e.start
+            ? `${e.start} to ${e.end} (all day)`
+            : e.isAllDay
+            ? `${e.start} (all day)`
+            : `${e.start} to ${e.end}`;
+        const loc = e.location ? ` @ ${e.location}` : "";
+        return `- [id:${e.id}] ${e.subject}: ${when}${loc}`;
+      });
+      return `Events:\n${lines.join("\n")}`;
+    } catch (e) {
+      return `Could not fetch calendar: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
+  if (name === "create_event") {
+    try {
+      return await createEvent({
+        subject: input.subject,
+        startIso: input.start_iso,
+        endIso: input.end_iso,
+        location: input.location,
+        attendees: input.attendees,
+      });
+    } catch (e) {
+      return `Could not create the event: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
+  if (name === "update_event") {
+    try {
+      return await updateEvent({
+        id: input.event_id,
+        subject: input.subject,
+        startIso: input.start_iso,
+        endIso: input.end_iso,
+        location: input.location,
+      });
+    } catch (e) {
+      return `Could not update the event: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
+  if (name === "delete_event") {
+    try {
+      return await deleteEvent(input.event_id);
+    } catch (e) {
+      return `Could not delete the event: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
   return `Unknown tool: ${name}`;
 }
 
@@ -319,6 +477,27 @@ function App() {
     };
   }, []);
 
+  // TEMPORARY (step 1 verification): prove login works and we can get a token.
+  // Remove once calendar tools are wired.
+  const connectOutlook = async () => {
+    setMessages((prev) => [...prev, { role: "intern", text: "Connecting to Outlook..." }]);
+    try {
+      await login();
+      const token = await getValidAccessToken();
+      console.log("MS Graph access token:", token);
+      await debugWhoAmI(); // TEMPORARY: log which account authed
+      setMessages((prev) => [
+        ...prev,
+        { role: "intern", text: `Connected to Outlook. Token in console (starts ${token.slice(0, 12)}...).` },
+      ]);
+    } catch (e) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "intern", text: `Outlook connect failed: ${e instanceof Error ? e.message : String(e)}` },
+      ]);
+    }
+  };
+
   const handleMinimize = () => {
     getCurrentWindow().minimize();
   };
@@ -354,6 +533,9 @@ function App() {
       <header className="titlebar" data-tauri-drag-region>
         <span className="brand">intern</span>
         <div className="window-controls">
+          <button className="win-btn" onClick={connectOutlook} title="Connect Outlook" style={{ width: "auto", padding: "0 8px" }}>
+            Connect Outlook
+          </button>
           <button className="win-btn" onClick={handleMinimize} title="Minimize">
             &#x2013;
           </button>

@@ -12,6 +12,9 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_oauth::init())
         .setup(|app| {
             let show = MenuItemBuilder::new("Show Intern").id("show").build(app)?;
             let quit = MenuItemBuilder::new("Quit").id("quit").build(app)?;
