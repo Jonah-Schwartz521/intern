@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   register,
   unregister,
@@ -15,8 +15,8 @@ import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { enable, isEnabled } from "@tauri-apps/plugin-autostart";
-import { login, getValidAccessToken } from "./msauth";
-import { listEvents, createEvent, deleteEvent, updateEvent, debugWhoAmI } from "./calendar";
+import { login, disconnect, isConnected, getAccount, refreshAccount } from "./msauth";
+import { listEvents, createEvent, deleteEvent, updateEvent } from "./calendar";
 import "./App.css";
 
 const HOTKEY = "CmdOrCtrl+Shift+Space";
@@ -445,6 +445,135 @@ async function askClaude(history: Message[]): Promise<string> {
   }
 }
 
+type ConnState = "disconnected" | "connecting" | "connected";
+
+// Middle-truncate an email so the domain stays visible, e.g.
+// "jonahschwartz521@outlook.com" -> "jonahsch…@outlook.com". Falls back to a
+// generic head/tail elision if there's no "@" or the domain alone is too long.
+function truncateEmail(email: string, max = 22): string {
+  if (email.length <= max) return email;
+  const at = email.lastIndexOf("@");
+  const genericMiddle = () => {
+    const keep = max - 1;
+    const head = Math.ceil(keep / 2);
+    const tail = Math.floor(keep / 2);
+    return email.slice(0, head) + "…" + email.slice(email.length - tail);
+  };
+  if (at === -1) return genericMiddle();
+  const local = email.slice(0, at);
+  const domain = email.slice(at); // includes "@"
+  const budget = max - domain.length - 1; // room for local head + the ellipsis
+  if (budget < 1) return genericMiddle(); // domain itself is too long
+  return local.slice(0, budget) + "…" + domain;
+}
+
+// Stateful Outlook connection control in the titlebar. Reads connection state
+// from whether valid tokens exist in the store.
+function OutlookStatus() {
+  const [state, setState] = useState<ConnState>("disconnected");
+  const [account, setAccount] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  const syncState = async () => {
+    if (await isConnected()) {
+      setState("connected");
+      let acct = await getAccount();
+      if (!acct) {
+        // Backfill for sessions connected before the account was stored.
+        await refreshAccount();
+        acct = await getAccount();
+      }
+      setAccount(acct);
+    } else {
+      setState("disconnected");
+      setAccount(null);
+    }
+  };
+
+  useEffect(() => {
+    syncState();
+  }, []);
+
+  // Close the dropdown when clicking outside it.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [menuOpen]);
+
+  const connect = async () => {
+    setState("connecting");
+    try {
+      await login();
+      await syncState();
+    } catch (e) {
+      console.error("Outlook connect failed:", e);
+      setState("disconnected");
+    }
+  };
+
+  const disconnectNow = async () => {
+    await disconnect();
+    setMenuOpen(false);
+    await syncState();
+  };
+
+  if (state === "connecting") {
+    return <span className="oa-pill oa-connecting">Connecting...</span>;
+  }
+
+  if (state === "connected") {
+    const label = account ?? "Connected";
+    const short = account ? truncateEmail(account) : "Connected";
+    return (
+      <div className="oa-wrap" ref={wrapRef}>
+        <button
+          className="oa-pill oa-connected"
+          title={label}
+          onClick={() => setMenuOpen((o) => !o)}
+        >
+          <svg
+            className="oa-mail"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M3 7a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-10z" />
+            <path d="M3 7l9 6l9 -6" />
+          </svg>
+          <span className="oa-email">{short}</span>
+          <span className="oa-dot" aria-hidden="true">&#x25CF;</span>
+        </button>
+        {menuOpen && (
+          <div className="oa-menu">
+            <button className="oa-menu-item" onClick={disconnectNow}>
+              Disconnect
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <button className="win-btn oa-connect" onClick={connect} title="Connect Outlook">
+      Connect Outlook
+    </button>
+  );
+}
+
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -478,27 +607,6 @@ function App() {
       unregister(HOTKEY);
     };
   }, []);
-
-  // TEMPORARY (step 1 verification): prove login works and we can get a token.
-  // Remove once calendar tools are wired.
-  const connectOutlook = async () => {
-    setMessages((prev) => [...prev, { role: "intern", text: "Connecting to Outlook..." }]);
-    try {
-      await login();
-      const token = await getValidAccessToken();
-      console.log("MS Graph access token:", token);
-      await debugWhoAmI(); // TEMPORARY: log which account authed
-      setMessages((prev) => [
-        ...prev,
-        { role: "intern", text: `Connected to Outlook. Token in console (starts ${token.slice(0, 12)}...).` },
-      ]);
-    } catch (e) {
-      setMessages((prev) => [
-        ...prev,
-        { role: "intern", text: `Outlook connect failed: ${e instanceof Error ? e.message : String(e)}` },
-      ]);
-    }
-  };
 
   const handleMinimize = () => {
     getCurrentWindow().minimize();
@@ -535,9 +643,7 @@ function App() {
       <header className="titlebar" data-tauri-drag-region>
         <span className="brand">intern</span>
         <div className="window-controls">
-          <button className="win-btn" onClick={connectOutlook} title="Connect Outlook" style={{ width: "auto", padding: "0 8px" }}>
-            Connect Outlook
-          </button>
+          <OutlookStatus />
           <button className="win-btn" onClick={handleMinimize} title="Minimize">
             &#x2013;
           </button>

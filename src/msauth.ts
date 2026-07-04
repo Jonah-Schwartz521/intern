@@ -15,6 +15,7 @@ import { start, cancel, onUrl } from "@fabianlars/tauri-plugin-oauth";
 const CLIENT_ID = "233ef4ee-3fc3-40a3-bd83-1cef84ea8b90";
 const AUTHORITY = "https://login.microsoftonline.com/common/oauth2/v2.0";
 const SCOPES = "Calendars.ReadWrite offline_access User.Read";
+const GRAPH_ME = "https://graph.microsoft.com/v1.0/me";
 
 const STORE_FILE = "ms-tokens.json";
 
@@ -83,13 +84,40 @@ export async function isConnected(): Promise<boolean> {
   return (await store.get<string>("refresh_token")) != null;
 }
 
+// The email of the connected account, for display. Null if unknown/disconnected.
+export async function getAccount(): Promise<string | null> {
+  const store = await tokenStore();
+  return (await store.get<string>("account")) ?? null;
+}
+
 // Clears stored tokens so the next login starts fresh (e.g. to switch accounts).
 export async function disconnect(): Promise<void> {
   const store = await tokenStore();
   await store.delete("access_token");
   await store.delete("refresh_token");
   await store.delete("expires_at");
+  await store.delete("account");
   await store.save();
+}
+
+// Look up the signed-in account and store its email so the UI can show it.
+// Called after login, and as a backfill for sessions connected before this
+// field existed. Non-fatal.
+export async function refreshAccount(): Promise<void> {
+  try {
+    const token = await getValidAccessToken();
+    const res = await httpFetch(GRAPH_ME, {
+      method: "GET",
+      headers: { Origin: "", Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return;
+    const me = await res.json();
+    const store = await tokenStore();
+    await store.set("account", me.mail || me.userPrincipalName || null);
+    await store.save();
+  } catch {
+    // Ignore: the pill will just show "Connected" without an email.
+  }
 }
 
 // ---------- login (interactive) ----------
@@ -154,6 +182,7 @@ export async function login(): Promise<void> {
     await openUrl(authUrl.toString());
     const code = await codePromise;
     await exchangeCode(code, verifier, redirectUri);
+    await refreshAccount();
   } finally {
     clearTimeout(timeout);
     unlisten();
