@@ -11,7 +11,9 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { Command } from "@tauri-apps/plugin-shell";
-import { openPath } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { login, getValidAccessToken } from "./msauth";
 import { listEvents, createEvent, deleteEvent, updateEvent, debugWhoAmI } from "./calendar";
@@ -550,7 +552,32 @@ function App() {
         )}
         {messages.map((msg, i) => (
           <div key={i} className={`message ${msg.role}`}>
-            {msg.text}
+            {msg.role === "intern" ? (
+              <div className="md">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    // Open links in the system browser; a bare <a> click would
+                    // navigate the webview away and blank the app.
+                    a: ({ href, children }) => (
+                      <a
+                        href={href}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (href) openUrl(href);
+                        }}
+                      >
+                        {children}
+                      </a>
+                    ),
+                  }}
+                >
+                  {msg.text}
+                </ReactMarkdown>
+              </div>
+            ) : (
+              msg.text
+            )}
           </div>
         ))}
         {thinking && <div className="message intern thinking">...</div>}

@@ -118,6 +118,102 @@ body {
   font-style: italic;
 }
 
+/* Markdown rendered inside intern bubbles. Kept compact so bubbles stay tight. */
+.md {
+  white-space: normal;
+}
+
+.md > *:first-child {
+  margin-top: 0;
+}
+
+.md > *:last-child {
+  margin-bottom: 0;
+}
+
+.md p {
+  margin: 0 0 6px;
+}
+
+.md ul,
+.md ol {
+  margin: 0 0 6px;
+  padding-left: 1.3em;
+}
+
+.md li {
+  margin: 1px 0;
+}
+
+.md li > p {
+  margin: 0;
+}
+
+.md strong {
+  font-weight: 600;
+  color: #f0e9df;
+}
+
+.md em {
+  font-style: italic;
+}
+
+.md a {
+  color: var(--copper);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.md a:hover {
+  color: #d8935a;
+}
+
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+  margin: 4px 0 6px;
+  font-size: 14px;
+  color: var(--copper);
+}
+
+.md code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  color: #d8935a;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
+.md pre {
+  margin: 0 0 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.md pre code {
+  border: none;
+  padding: 0;
+  color: var(--text);
+}
+
+.md blockquote {
+  margin: 0 0 6px;
+  padding-left: 10px;
+  border-left: 2px solid var(--copper-dim);
+  color: var(--text-dim);
+}
+
+.md hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 8px 0;
+}
+
 .titlebar {
   flex: 0 0 auto;
   display: flex;
