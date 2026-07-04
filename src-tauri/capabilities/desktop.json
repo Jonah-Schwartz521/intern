@@ -47,19 +47,6 @@
           "name": "whisper-run",
           "cmd": "C:\\dev\\intern\\src-tauri\\binaries\\whisper\\main.exe",
           "args": ["-m", { "validator": ".+" }, "-f", { "validator": ".+" }, "-nt"]
-        },
-        {
-          "comment": "One-time speech model download (curl ships with Windows). URL locked to the HF model.",
-          "name": "curl",
-          "cmd": "curl",
-          "args": [
-            "-L",
-            "--fail",
-            "-sS",
-            "-o",
-            { "validator": ".+" },
-            { "validator": "https://huggingface\\.co/ggerganov/whisper\\.cpp/resolve/main/ggml-base\\.bin" }
-          ]
         }
       ]
     },

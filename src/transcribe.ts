@@ -1,60 +1,63 @@
 // Local file transcription via the bundled Const-me/Whisper CLI (GPU, Direct3D).
 // No ffmpeg: Const-me decodes audio/video directly through Media Foundation, and
-// prints the transcript to stdout. The ggml model is downloaded once (curl, which
-// ships with Windows) into the app data dir and cached.
+// prints the transcript to stdout. The ggml model ships as a bundled resource and
+// is copied into the app data dir on first use (no network).
 
 import { Command } from "@tauri-apps/plugin-shell";
-import { appLocalDataDir, join } from "@tauri-apps/api/path";
+import { appLocalDataDir, join, resolveResource } from "@tauri-apps/api/path";
 
-const MODEL_URL =
-  "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin";
 const MODEL_FILE = "ggml-base.bin";
+// Location of the model inside the bundled resource dir (see tauri.conf.json).
+const MODEL_RESOURCE = "resources/ggml-base.bin";
+// Exact size of ggml-base.bin; integrity guard on the copy so a truncated file
+// can never poison future transcribes.
+const MODEL_BYTES = 147951465;
 
 async function modelDir(): Promise<string> {
   return join(await appLocalDataDir(), "models");
 }
 
-// Existence + mkdir go through the already-scoped powershell command.
-async function psExists(path: string): Promise<boolean> {
+// File size via the already-scoped powershell command, or -1 if absent.
+async function psFileSize(path: string): Promise<number> {
   const safe = path.replace(/'/g, "''");
   const out = await Command.create("powershell", [
     "-NoProfile",
     "-Command",
-    `if (Test-Path -LiteralPath '${safe}') { 'yes' } else { 'no' }`,
+    `if (Test-Path -LiteralPath '${safe}') { (Get-Item -LiteralPath '${safe}').Length } else { -1 }`,
   ]).execute();
-  return out.stdout.trim() === "yes";
+  const n = parseInt(out.stdout.trim(), 10);
+  return Number.isNaN(n) ? -1 : n;
 }
 
 async function ensureModel(onStatus: (s: string) => void): Promise<string> {
   const dir = await modelDir();
-  const path = await join(dir, MODEL_FILE);
-  if (await psExists(path)) return path;
+  const dest = await join(dir, MODEL_FILE);
+  // Only a complete (exact-size) file counts as cached; a short/corrupt file is
+  // replaced by re-copying from the bundle.
+  if ((await psFileSize(dest)) === MODEL_BYTES) return dest;
 
-  onStatus("Downloading speech model (~142 MB, one time)...");
+  onStatus("Preparing speech model (one time)...");
 
+  // The model ships with the app as a bundled resource; copy it into the
+  // writable app-data dir on first use. No network.
+  const src = await resolveResource(MODEL_RESOURCE);
+  const safeSrc = src.replace(/'/g, "''");
   const safeDir = dir.replace(/'/g, "''");
-  const mk = await Command.create("powershell", [
-    "-NoProfile",
-    "-Command",
-    `New-Item -ItemType Directory -Force -Path '${safeDir}' | Out-Null`,
-  ]).execute();
-  if (mk.code !== 0) throw new Error(`Could not create model folder: ${mk.stderr}`);
+  const safeDest = dest.replace(/'/g, "''");
+  const script = `
+$ErrorActionPreference = 'Stop'
+New-Item -ItemType Directory -Force -Path '${safeDir}' | Out-Null
+Copy-Item -LiteralPath '${safeSrc}' -Destination '${safeDest}' -Force
+`.trim();
 
-  const dl = await Command.create("curl", [
-    "-L",
-    "--fail",
-    "-sS",
-    "-o",
-    path,
-    MODEL_URL,
-  ]).execute();
-  if (dl.code !== 0) {
-    throw new Error(`Model download failed (curl exit ${dl.code}): ${dl.stderr}`);
+  const cp = await Command.create("powershell", ["-NoProfile", "-Command", script]).execute();
+  if (cp.code !== 0) {
+    throw new Error(`Could not copy bundled model: ${(cp.stderr || cp.stdout).trim()}`);
   }
-  if (!(await psExists(path))) {
-    throw new Error("Model download completed but the file is missing.");
+  if ((await psFileSize(dest)) !== MODEL_BYTES) {
+    throw new Error("Bundled model failed its integrity check after copy.");
   }
-  return path;
+  return dest;
 }
 
 /**
