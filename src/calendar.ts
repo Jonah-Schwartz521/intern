@@ -51,22 +51,6 @@ function toLocal(dateTime: string, isAllDay: boolean): string {
   });
 }
 
-// TEMPORARY debug: confirm which account Connect Outlook authed as. Remove once
-// the account is verified.
-export async function debugWhoAmI(): Promise<void> {
-  const token = await getValidAccessToken();
-  const res = await httpFetch(`${GRAPH}/me`, {
-    method: "GET",
-    headers: { ...STRIP_ORIGIN, Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) {
-    console.error("GET /me failed:", res.status, await res.text());
-    return;
-  }
-  const me = await res.json();
-  console.log("Authed account -> userPrincipalName:", me.userPrincipalName, "| mail:", me.mail);
-}
-
 /**
  * List calendar events between two instants. Defaults to start-of-today through
  * 7 days later. start/end are ISO 8601 strings (Claude computes them).
@@ -87,19 +71,6 @@ export async function listEvents(
   url.searchParams.set("$orderby", "start/dateTime");
   url.searchParams.set("$top", "50");
 
-  // TEMPORARY debug: exact range sent to Graph + raw response. Remove once fixed.
-  console.log("[list_events] local timezone:", Intl.DateTimeFormat().resolvedOptions().timeZone);
-  console.log("[list_events] startIso arg:", startIso, "| endIso arg:", endIso);
-  console.log(
-    "[list_events] startDateTime (UTC sent):", start.toISOString(),
-    "=> local:", start.toLocaleString()
-  );
-  console.log(
-    "[list_events] endDateTime (UTC sent):", end.toISOString(),
-    "=> local:", end.toLocaleString()
-  );
-  console.log("[list_events] full URL:", url.toString());
-
   const res = await httpFetch(url.toString(), {
     method: "GET",
     headers: {
@@ -110,14 +81,11 @@ export async function listEvents(
     },
   });
 
-  const rawBody = await res.text();
-  console.log("[list_events] status:", res.status, "| raw response:", rawBody);
-
   if (!res.ok) {
-    throw new Error(`Graph calendarView failed: ${res.status} ${rawBody}`);
+    throw new Error(`Graph calendarView failed: ${res.status} ${await res.text()}`);
   }
 
-  const data = JSON.parse(rawBody);
+  const data = await res.json();
   const items: any[] = data.value ?? [];
 
   return items.map((e) => {
