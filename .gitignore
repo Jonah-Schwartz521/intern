@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 
 .env
+
+# Bundled transcription binaries (large / license-specific; staged locally)
+src-tauri/binaries/

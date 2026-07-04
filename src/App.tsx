@@ -15,8 +15,10 @@ import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { enable, isEnabled } from "@tauri-apps/plugin-autostart";
+import { open } from "@tauri-apps/plugin-dialog";
 import { login, disconnect, isConnected, getAccount, refreshAccount } from "./msauth";
 import { listEvents, createEvent, deleteEvent, updateEvent } from "./calendar";
+import { transcribe } from "./transcribe";
 import "./App.css";
 
 const HOTKEY = "CmdOrCtrl+Shift+Space";
@@ -190,12 +192,33 @@ const TOOLS = [
       required: ["event_id"],
     },
   },
+  {
+    name: "transcribe_file",
+    description:
+      "Transcribe an audio or video file to text using local (on-device) speech-to-text. Use when the user asks to transcribe, get a transcript, or turn audio/video into text. Works on mp3, mp4, wav, m4a, mov, and most media. If no path is given, a file picker opens for the user to choose.",
+    input_schema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description:
+            "Full path to the audio or video file. Omit to open a file picker for the user to choose a file.",
+        },
+      },
+      required: [],
+    },
+  },
 ];
 
 type Message = {
   role: "user" | "intern";
   text: string;
 };
+
+// UI sinks so runTool (which lives outside the component) can report progress and
+// push a message. Registered by the App component on mount.
+let uiStatus: ((s: string) => void) | null = null;
+let uiPush: ((m: Message) => void) | null = null;
 
 function pickModel(userText: string): string {
   const t = userText.toLowerCase();
@@ -375,6 +398,43 @@ async function runTool(name: string, input: any): Promise<string> {
       return await deleteEvent(input.event_id);
     } catch (e) {
       return `Could not delete the event: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
+  if (name === "transcribe_file") {
+    try {
+      let path: string | undefined = input.path;
+      if (!path) {
+        const picked = await open({
+          multiple: false,
+          directory: false,
+          title: "Choose audio or video to transcribe",
+          filters: [
+            {
+              name: "Audio/Video",
+              extensions: [
+                "mp3", "mp4", "wav", "m4a", "mov", "mkv", "flac",
+                "ogg", "webm", "avi", "aac", "wma", "wmv",
+              ],
+            },
+          ],
+        });
+        if (!picked || Array.isArray(picked)) return "No file was selected.";
+        path = picked;
+      }
+
+      const text = await transcribe(path, (s) => uiStatus?.(s));
+      if (!text) return "That file transcribed to empty text (no speech detected).";
+
+      // Show the full transcript directly (it can be long and would otherwise be
+      // truncated by the model's max_tokens); Claude just confirms.
+      const fileName = path.split(/[\\/]/).pop() || path;
+      uiPush?.({ role: "intern", text: `**Transcript** (${fileName}):\n\n${text}` });
+
+      const words = text.split(/\s+/).filter(Boolean).length;
+      return `Transcription complete: ${words} words. The full transcript has been shown to the user above; confirm briefly and do not repeat it.`;
+    } catch (e) {
+      return `Could not transcribe: ${e instanceof Error ? e.message : String(e)}`;
     }
   }
 
@@ -578,6 +638,17 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
+  const [status, setStatus] = useState("");
+
+  // Let runTool report progress and push messages into this component.
+  useEffect(() => {
+    uiStatus = setStatus;
+    uiPush = (m) => setMessages((prev) => [...prev, m]);
+    return () => {
+      uiStatus = null;
+      uiPush = null;
+    };
+  }, []);
 
   useEffect(() => {
     const setup = async () => {
@@ -635,6 +706,7 @@ function App() {
       ]);
     } finally {
       setThinking(false);
+      setStatus("");
     }
   };
 
@@ -686,7 +758,9 @@ function App() {
             )}
           </div>
         ))}
-        {thinking && <div className="message intern thinking">...</div>}
+        {thinking && (
+          <div className="message intern thinking">{status || "..."}</div>
+        )}
       </div>
       <input
         className="input"
