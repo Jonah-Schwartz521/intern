@@ -44,7 +44,7 @@ body {
   color: var(--copper);
   font-weight: 600;
   letter-spacing: 0.08em;
-  text-transform: lowercase;
+  text-transform: none;
 }
 
 .history {

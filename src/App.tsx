@@ -641,7 +641,7 @@ function App() {
   return (
     <main className="container">
       <header className="titlebar" data-tauri-drag-region>
-        <span className="brand">intern</span>
+        <span className="brand">Intern</span>
         <div className="window-controls">
           <OutlookStatus />
           <button className="win-btn" onClick={handleMinimize} title="Minimize">
