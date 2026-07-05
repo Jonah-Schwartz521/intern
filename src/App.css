@@ -84,9 +84,15 @@ body {
   color: var(--text);
 }
 
-.input {
+.input-row {
   flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
   margin: 12px 16px 16px 16px;
+}
+
+.input {
+  flex: 1 1 auto;
   padding: 12px 14px;
   background: var(--bg-raised);
   border: 1px solid var(--border);
@@ -95,6 +101,40 @@ body {
   font-family: var(--mono);
   font-size: 14px;
   outline: none;
+}
+
+.mic-btn {
+  flex: 0 0 auto;
+  width: 42px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  color: var(--text);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.mic-btn:hover {
+  border-color: var(--copper-dim);
+}
+
+.mic-btn.recording {
+  color: #fff;
+  background: #c0392b;
+  border-color: #c0392b;
+  animation: mic-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes mic-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(192, 57, 43, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgba(192, 57, 43, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(192, 57, 43, 0);
+  }
 }
 
 .input:focus {

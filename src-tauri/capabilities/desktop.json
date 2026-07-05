@@ -22,6 +22,14 @@
     "notification:default",
     "dialog:allow-open",
     {
+      "identifier": "fs:allow-write-file",
+      "allow": [{ "path": "$TEMP/intern-voice-input.*" }]
+    },
+    {
+      "identifier": "fs:allow-remove",
+      "allow": [{ "path": "$TEMP/intern-voice-input.*" }]
+    },
+    {
       "identifier": "opener:allow-open-path",
       "allow": [
         {

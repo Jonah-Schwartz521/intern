@@ -19,6 +19,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { login, disconnect, isConnected, getAccount, refreshAccount } from "./msauth";
 import { listEvents, createEvent, deleteEvent, updateEvent } from "./calendar";
 import { transcribe } from "./transcribe";
+import { writeTempAudio, removeTempAudio } from "./voice";
 import "./App.css";
 
 const HOTKEY = "CmdOrCtrl+Shift+Space";
@@ -639,6 +640,10 @@ function App() {
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
   const [status, setStatus] = useState("");
+  const [recording, setRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Let runTool report progress and push messages into this component.
   useEffect(() => {
@@ -685,6 +690,82 @@ function App() {
 
   const handleClose = () => {
     getCurrentWindow().hide();
+  };
+
+  // Transcribe the recording and drop the text into the input box for the user
+  // to review/edit and send. Never auto-sends. Temp file is cleaned up after.
+  const handleRecordedAudio = async (blob: Blob) => {
+    setThinking(true);
+    setStatus("Transcribing voice...");
+    let tempPath: string | undefined;
+    try {
+      tempPath = await writeTempAudio(blob);
+      const text = (await transcribe(tempPath, (s) => setStatus(s))).trim();
+      if (text) {
+        setInput((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
+        inputRef.current?.focus();
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          { role: "intern", text: "I didn't catch any speech in that recording." },
+        ]);
+      }
+    } catch (e) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "intern", text: `Voice transcription failed: ${e instanceof Error ? e.message : String(e)}` },
+      ]);
+    } finally {
+      if (tempPath) {
+        try {
+          await removeTempAudio(tempPath);
+        } catch (err) {
+          console.warn("temp cleanup failed", err);
+        }
+      }
+      setThinking(false);
+      setStatus("");
+    }
+  };
+
+  const toggleMic = async () => {
+    const rec = mediaRecorderRef.current;
+    if (recording && rec) {
+      rec.stop();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Record as mp4/AAC, which Media Foundation (whisper's decoder) reads
+      // directly, so no conversion step is needed. Fall back to the browser
+      // default on any Windows setup that can't record mp4.
+      let mr: MediaRecorder;
+      if (MediaRecorder.isTypeSupported("audio/mp4")) {
+        mr = new MediaRecorder(stream, { mimeType: "audio/mp4" });
+      } else {
+        console.warn("[voice] audio/mp4 unsupported here; falling back to default recorder format");
+        mr = new MediaRecorder(stream);
+      }
+      chunksRef.current = [];
+      mr.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      mr.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setRecording(false);
+        const type = mr.mimeType || chunksRef.current[0]?.type || "audio/webm";
+        await handleRecordedAudio(new Blob(chunksRef.current, { type }));
+      };
+      mr.start();
+      mediaRecorderRef.current = mr;
+      setRecording(true);
+    } catch (e) {
+      setRecording(false);
+      setMessages((prev) => [
+        ...prev,
+        { role: "intern", text: `Mic error: ${e instanceof Error ? e.message : String(e)}` },
+      ]);
+    }
   };
 
   const send = async () => {
@@ -762,16 +843,26 @@ function App() {
           <div className="message intern thinking">{status || "..."}</div>
         )}
       </div>
-      <input
-        className="input"
-        value={input}
-        onChange={(e) => setInput(e.currentTarget.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") send();
-        }}
-        placeholder="Ask Intern..."
-        autoFocus
-      />
+      <div className="input-row">
+        <input
+          ref={inputRef}
+          className="input"
+          value={input}
+          onChange={(e) => setInput(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") send();
+          }}
+          placeholder="Ask Intern..."
+          autoFocus
+        />
+        <button
+          className={`mic-btn${recording ? " recording" : ""}`}
+          onClick={toggleMic}
+          title={recording ? "Stop recording" : "Record voice"}
+        >
+          {recording ? "⏹" : "🎤"}
+        </button>
+      </div>
     </main>
   );
 }
