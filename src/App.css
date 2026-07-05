@@ -190,6 +190,29 @@ body {
   white-space: normal;
 }
 
+/* Copy affordance on transcript bubbles. */
+.transcript-head {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+
+.copy-btn {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.copy-btn:hover {
+  color: var(--copper);
+  border-color: var(--copper-dim);
+}
+
 .md > *:first-child {
   margin-top: 0;
 }

@@ -214,12 +214,38 @@ const TOOLS = [
 type Message = {
   role: "user" | "intern";
   text: string;
+  // When set, the message is a transcript (content, not a command) and renders a
+  // copy button that copies this raw text.
+  copyText?: string;
 };
 
 // UI sinks so runTool (which lives outside the component) can report progress and
 // push a message. Registered by the App component on mount.
 let uiStatus: ((s: string) => void) | null = null;
 let uiPush: ((m: Message) => void) | null = null;
+
+// Copy text to the clipboard; falls back to a hidden textarea when the async
+// Clipboard API is unavailable. Returns whether it succeeded.
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
 
 function pickModel(userText: string): string {
   const t = userText.toLowerCase();
@@ -430,7 +456,7 @@ async function runTool(name: string, input: any): Promise<string> {
       // Show the full transcript directly (it can be long and would otherwise be
       // truncated by the model's max_tokens); Claude just confirms.
       const fileName = path.split(/[\\/]/).pop() || path;
-      uiPush?.({ role: "intern", text: `**Transcript** (${fileName}):\n\n${text}` });
+      uiPush?.({ role: "intern", text: `**Transcript** (${fileName}):\n\n${text}`, copyText: text });
 
       const words = text.split(/\s+/).filter(Boolean).length;
       return `Transcription complete: ${words} words. The full transcript has been shown to the user above; confirm briefly and do not repeat it.`;
@@ -656,6 +682,7 @@ function App() {
   const [status, setStatus] = useState("");
   const [recording, setRecording] = useState(false);
   const [source, setSource] = useState<"mic" | "system">("mic");
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -699,6 +726,13 @@ function App() {
     };
   }, []);
 
+  const handleCopy = async (text: string, idx: number) => {
+    if (await copyToClipboard(text)) {
+      setCopiedIdx(idx);
+      setTimeout(() => setCopiedIdx((c) => (c === idx ? null : c)), 1500);
+    }
+  };
+
   const handleMinimize = () => {
     getCurrentWindow().minimize();
   };
@@ -707,22 +741,28 @@ function App() {
     getCurrentWindow().hide();
   };
 
-  // Transcribe the recording and drop the text into the input box for the user
-  // to review/edit and send. Never auto-sends. Temp file is cleaned up after.
-  const handleRecordedAudio = async (blob: Blob) => {
+  // Transcribe the recording. Mic input is a command → goes to the input box for
+  // review/send. System audio is captured content → goes to a transcript bubble.
+  // Never auto-sends. Temp file is cleaned up after.
+  const handleRecordedAudio = async (blob: Blob, src: "mic" | "system") => {
     setThinking(true);
-    setStatus("Transcribing voice...");
+    setStatus("Transcribing...");
     let tempPath: string | undefined;
     try {
       tempPath = await writeTempAudio(blob);
       const text = (await transcribe(tempPath, (s) => setStatus(s))).trim();
-      if (text) {
+      if (!text) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "intern", text: "I didn't catch any speech in that recording." },
+        ]);
+      } else if (src === "mic") {
         setInput((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
         inputRef.current?.focus();
       } else {
         setMessages((prev) => [
           ...prev,
-          { role: "intern", text: "I didn't catch any speech in that recording." },
+          { role: "intern", text: `**Transcript** (system audio):\n\n${text}`, copyText: text },
         ]);
       }
     } catch (e) {
@@ -782,7 +822,9 @@ function App() {
         stream.getTracks().forEach((t) => t.stop());
         setRecording(false);
         const type = mr.mimeType || chunksRef.current[0]?.type || "audio/webm";
-        await handleRecordedAudio(new Blob(chunksRef.current, { type }));
+        // source can't change mid-recording (toggle is disabled), so this is the
+        // source the clip was captured with.
+        await handleRecordedAudio(new Blob(chunksRef.current, { type }), source);
       };
       mr.start();
       mediaRecorderRef.current = mr;
@@ -841,6 +883,13 @@ function App() {
           <div key={i} className={`message ${msg.role}`}>
             {msg.role === "intern" ? (
               <div className="md">
+                {msg.copyText != null && (
+                  <div className="transcript-head">
+                    <button className="copy-btn" onClick={() => handleCopy(msg.copyText!, i)}>
+                      {copiedIdx === i ? "Copied" : "Copy"}
+                    </button>
+                  </div>
+                )}
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   components={{
