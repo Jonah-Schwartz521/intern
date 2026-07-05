@@ -118,6 +118,33 @@ body {
   border-color: var(--copper-dim);
 }
 
+.src-btn {
+  flex: 0 0 auto;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.src-btn:hover {
+  border-color: var(--copper-dim);
+}
+
+.src-btn.sys {
+  color: var(--copper);
+  border-color: var(--copper-dim);
+}
+
+.src-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .mic-btn.recording {
   color: #fff;
   background: #c0392b;

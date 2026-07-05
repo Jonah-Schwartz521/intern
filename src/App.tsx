@@ -635,12 +635,27 @@ function OutlookStatus() {
   );
 }
 
+// Resolve the Stereo Mix loopback deviceId for system-audio capture. Unlocks
+// device labels with a brief mic grant if they're hidden.
+async function findStereoMixId(): Promise<string | null> {
+  const pick = (ds: MediaDeviceInfo[]) =>
+    ds.find((d) => d.kind === "audioinput" && /stereo mix/i.test(d.label));
+  let stereo = pick(await navigator.mediaDevices.enumerateDevices());
+  if (!stereo) {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+    s.getTracks().forEach((t) => t.stop());
+    stereo = pick(await navigator.mediaDevices.enumerateDevices());
+  }
+  return stereo?.deviceId ?? null;
+}
+
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
   const [status, setStatus] = useState("");
   const [recording, setRecording] = useState(false);
+  const [source, setSource] = useState<"mic" | "system">("mic");
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -735,7 +750,20 @@ function App() {
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Default: microphone. System audio taps the Stereo Mix loopback device.
+      let constraints: MediaStreamConstraints = { audio: true };
+      if (source === "system") {
+        const deviceId = await findStereoMixId();
+        if (!deviceId) {
+          setMessages((prev) => [
+            ...prev,
+            { role: "intern", text: "System audio source (Stereo Mix) not found. Enable Stereo Mix in Windows sound settings, or switch the source back to mic." },
+          ]);
+          return;
+        }
+        constraints = { audio: { deviceId: { exact: deviceId } } };
+      }
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       // Record as mp4/AAC, which Media Foundation (whisper's decoder) reads
       // directly, so no conversion step is needed. Fall back to the browser
       // default on any Windows setup that can't record mp4.
@@ -856,9 +884,21 @@ function App() {
           autoFocus
         />
         <button
+          className={`src-btn${source === "system" ? " sys" : ""}`}
+          onClick={() => setSource((s) => (s === "mic" ? "system" : "mic"))}
+          disabled={recording}
+          title={
+            source === "mic"
+              ? "Source: microphone — click to capture system audio (Stereo Mix)"
+              : "Source: system audio (Stereo Mix) — click to capture microphone"
+          }
+        >
+          {source === "mic" ? "🎤 mic" : "🔊 sys"}
+        </button>
+        <button
           className={`mic-btn${recording ? " recording" : ""}`}
           onClick={toggleMic}
-          title={recording ? "Stop recording" : "Record voice"}
+          title={recording ? "Stop recording" : `Record ${source === "mic" ? "voice" : "system audio"}`}
         >
           {recording ? "⏹" : "🎤"}
         </button>
