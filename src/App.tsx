@@ -24,6 +24,10 @@ import "./App.css";
 
 const HOTKEY = "CmdOrCtrl+Shift+Space";
 
+// Recordings smaller than this are treated as empty (an accidental tap or no
+// audio), and skipped before hitting whisper.
+const MIN_AUDIO_BYTES = 2048;
+
 const HAIKU = "claude-haiku-4-5-20251001";
 const OPUS = "claude-opus-4-8";
 
@@ -461,7 +465,9 @@ async function runTool(name: string, input: any): Promise<string> {
       const words = text.split(/\s+/).filter(Boolean).length;
       return `Transcription complete: ${words} words. The full transcript has been shown to the user above; confirm briefly and do not repeat it.`;
     } catch (e) {
-      return `Could not transcribe: ${e instanceof Error ? e.message : String(e)}`;
+      // Log the full error (incl. whisper stderr); return a short, clean message.
+      console.error("transcribe_file failed:", e);
+      return "The transcription failed. Tell the user to try again.";
     }
   }
 
@@ -745,6 +751,13 @@ function App() {
   // review/send. System audio is captured content → goes to a transcript bubble.
   // Never auto-sends. Temp file is cleaned up after.
   const handleRecordedAudio = async (blob: Blob, src: "mic" | "system") => {
+    if (blob.size < MIN_AUDIO_BYTES) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "intern", text: "Didn't catch any audio, try again." },
+      ]);
+      return;
+    }
     setThinking(true);
     setStatus("Transcribing...");
     let tempPath: string | undefined;
@@ -766,9 +779,11 @@ function App() {
         ]);
       }
     } catch (e) {
+      // Log the full error (incl. whisper stderr) for debugging; never show it.
+      console.error("transcription failed:", e);
       setMessages((prev) => [
         ...prev,
-        { role: "intern", text: `Voice transcription failed: ${e instanceof Error ? e.message : String(e)}` },
+        { role: "intern", text: "Transcription failed, try again." },
       ]);
     } finally {
       if (tempPath) {
