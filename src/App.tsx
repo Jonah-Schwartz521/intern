@@ -985,16 +985,24 @@ function App() {
     try {
       const account = await getAccount();
       const to = account ? [account] : [];
-      const link = await createDraft({
+      const webLink = await createDraft({
         subject: "Intern draft test",
         body: "This is a test draft created by Intern via Microsoft Graph. Safe to delete.",
         to,
       });
-      console.log("draft created:", link);
-      setMessages((prev) => [
-        ...prev,
-        { role: "intern", text: `Draft created. Check your Outlook Drafts folder. (link/id logged to console)` },
-      ]);
+      console.log("draft webLink:", webLink);
+      if (webLink) {
+        await openUrl(webLink);
+        setMessages((prev) => [
+          ...prev,
+          { role: "intern", text: "Draft created and opened in Outlook. Review and send it there." },
+        ]);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          { role: "intern", text: "Draft created. Check your Outlook Drafts folder." },
+        ]);
+      }
     } catch (e) {
       console.error("test draft failed:", e);
       setMessages((prev) => [

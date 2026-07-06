@@ -11,7 +11,8 @@ const STRIP_ORIGIN = { Origin: "" };
 
 /**
  * Create a draft email in the user's Outlook Drafts folder. Returns the draft's
- * webLink (or id) so it can be opened. Does not send.
+ * webLink (a URL that opens the message in Outlook on the web), or "" if the
+ * response omits it. Does not send.
  */
 export async function createDraft(args: {
   subject: string;
@@ -41,5 +42,5 @@ export async function createDraft(args: {
   }
 
   const created = await res.json();
-  return created.webLink || created.id || "(created)";
+  return (created.webLink as string) ?? "";
 }
