@@ -681,17 +681,68 @@ async function findStereoMixId(): Promise<string | null> {
   return stereo?.deviceId ?? null;
 }
 
+// Line icons (Tabler), stroke = currentColor so they follow the button color.
+const IconMic = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M9 2m0 3a3 3 0 0 1 3 -3h0a3 3 0 0 1 3 3v5a3 3 0 0 1 -3 3h0a3 3 0 0 1 -3 -3z" />
+    <path d="M5 10a7 7 0 0 0 14 0" />
+    <path d="M8 21l8 0" />
+    <path d="M12 17l0 4" />
+  </svg>
+);
+const IconStop = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <rect x="6" y="6" width="12" height="12" rx="2" />
+  </svg>
+);
+const IconSend = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 5l0 14" />
+    <path d="M16 9l-4 -4" />
+    <path d="M8 9l4 -4" />
+  </svg>
+);
+const IconDots = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <circle cx="5" cy="12" r="1.6" />
+    <circle cx="12" cy="12" r="1.6" />
+    <circle cx="19" cy="12" r="1.6" />
+  </svg>
+);
+const IconVolume = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M15 8a5 5 0 0 1 0 8" />
+    <path d="M17.7 5a9 9 0 0 1 0 14" />
+    <path d="M6 15h-2a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1h2l3.5 -4.5a.8 .8 0 0 1 1.5 .5v14a.8 .8 0 0 1 -1.5 .5l-3.5 -4.5" />
+  </svg>
+);
+const IconFile = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M14 3v4a1 1 0 0 0 1 1h4" />
+    <path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z" />
+    <path d="M9 13l6 0" />
+    <path d="M9 17l6 0" />
+  </svg>
+);
+const IconSettings = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z" />
+    <path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" />
+  </svg>
+);
+
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
   const [status, setStatus] = useState("");
   const [recording, setRecording] = useState(false);
-  const [source, setSource] = useState<"mic" | "system">("mic");
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [rowMenuOpen, setRowMenuOpen] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const rowMenuRef = useRef<HTMLDivElement>(null);
 
   // Let runTool report progress and push messages into this component.
   useEffect(() => {
@@ -702,6 +753,18 @@ function App() {
       uiPush = null;
     };
   }, []);
+
+  // Close the overflow menu when clicking outside it.
+  useEffect(() => {
+    if (!rowMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (rowMenuRef.current && !rowMenuRef.current.contains(e.target as Node)) {
+        setRowMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [rowMenuOpen]);
 
   useEffect(() => {
     const setup = async () => {
@@ -736,6 +799,54 @@ function App() {
     if (await copyToClipboard(text)) {
       setCopiedIdx(idx);
       setTimeout(() => setCopiedIdx((c) => (c === idx ? null : c)), 1500);
+    }
+  };
+
+  // Overflow menu action: transcribe a file. Opens the picker and runs the same
+  // whisper path as the transcribe_file tool; content goes to a transcript bubble.
+  const transcribeFileFromMenu = async () => {
+    setRowMenuOpen(false);
+    const picked = await open({
+      multiple: false,
+      directory: false,
+      title: "Choose audio or video to transcribe",
+      filters: [
+        {
+          name: "Audio/Video",
+          extensions: [
+            "mp3", "mp4", "wav", "m4a", "mov", "mkv", "flac",
+            "ogg", "webm", "avi", "aac", "wma", "wmv",
+          ],
+        },
+      ],
+    });
+    if (!picked || Array.isArray(picked)) return;
+    const path = picked;
+    setThinking(true);
+    setStatus("Transcribing...");
+    try {
+      const text = (await transcribe(path, (s) => setStatus(s))).trim();
+      const fileName = path.split(/[\\/]/).pop() || path;
+      if (text) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "intern", text: `**Transcript** (${fileName}):\n\n${text}`, copyText: text },
+        ]);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          { role: "intern", text: "That file transcribed to empty text (no speech detected)." },
+        ]);
+      }
+    } catch (e) {
+      console.error("transcribe file (menu) failed:", e);
+      setMessages((prev) => [
+        ...prev,
+        { role: "intern", text: "Transcription failed, try again." },
+      ]);
+    } finally {
+      setThinking(false);
+      setStatus("");
     }
   };
 
@@ -798,21 +909,20 @@ function App() {
     }
   };
 
-  const toggleMic = async () => {
-    const rec = mediaRecorderRef.current;
-    if (recording && rec) {
-      rec.stop();
-      return;
-    }
+  // Start a recording from the given source. Voice uses the default mic; system
+  // audio taps the Stereo Mix loopback device. The record button reflects the
+  // recording state and stops it; on stop the clip is transcribed.
+  const startRecording = async (src: "mic" | "system") => {
+    if (recording) return;
+    setRowMenuOpen(false);
     try {
-      // Default: microphone. System audio taps the Stereo Mix loopback device.
       let constraints: MediaStreamConstraints = { audio: true };
-      if (source === "system") {
+      if (src === "system") {
         const deviceId = await findStereoMixId();
         if (!deviceId) {
           setMessages((prev) => [
             ...prev,
-            { role: "intern", text: "System audio source (Stereo Mix) not found. Enable Stereo Mix in Windows sound settings, or switch the source back to mic." },
+            { role: "intern", text: "System audio source (Stereo Mix) not found. Enable Stereo Mix in Windows sound settings." },
           ]);
           return;
         }
@@ -837,9 +947,7 @@ function App() {
         stream.getTracks().forEach((t) => t.stop());
         setRecording(false);
         const type = mr.mimeType || chunksRef.current[0]?.type || "audio/webm";
-        // source can't change mid-recording (toggle is disabled), so this is the
-        // source the clip was captured with.
-        await handleRecordedAudio(new Blob(chunksRef.current, { type }), source);
+        await handleRecordedAudio(new Blob(chunksRef.current, { type }), src);
       };
       mr.start();
       mediaRecorderRef.current = mr;
@@ -851,6 +959,20 @@ function App() {
         { role: "intern", text: `Mic error: ${e instanceof Error ? e.message : String(e)}` },
       ]);
     }
+  };
+
+  // Record button: stop if recording, otherwise start a voice recording.
+  const toggleMic = () => {
+    if (recording) mediaRecorderRef.current?.stop();
+    else startRecording("mic");
+  };
+
+  const openSettings = () => {
+    setRowMenuOpen(false);
+    setMessages((prev) => [
+      ...prev,
+      { role: "intern", text: "Settings are not available yet." },
+    ]);
   };
 
   const send = async () => {
@@ -936,6 +1058,35 @@ function App() {
         )}
       </div>
       <div className="input-row">
+        <button
+          className={`mic-btn${recording ? " recording" : ""}`}
+          onClick={toggleMic}
+          title={recording ? "Stop recording" : "Record voice"}
+        >
+          {recording ? <IconStop /> : <IconMic />}
+        </button>
+        <div className="menu-wrap" ref={rowMenuRef}>
+          <button
+            className="menu-btn"
+            onClick={() => setRowMenuOpen((o) => !o)}
+            title="More"
+          >
+            <IconDots />
+          </button>
+          {rowMenuOpen && (
+            <div className="row-menu">
+              <button className="row-menu-item" onClick={() => startRecording("system")} disabled={recording}>
+                <IconVolume /> System audio
+              </button>
+              <button className="row-menu-item" onClick={transcribeFileFromMenu}>
+                <IconFile /> Transcribe file
+              </button>
+              <button className="row-menu-item" onClick={openSettings}>
+                <IconSettings /> Settings
+              </button>
+            </div>
+          )}
+        </div>
         <input
           ref={inputRef}
           className="input"
@@ -948,23 +1099,12 @@ function App() {
           autoFocus
         />
         <button
-          className={`src-btn${source === "system" ? " sys" : ""}`}
-          onClick={() => setSource((s) => (s === "mic" ? "system" : "mic"))}
-          disabled={recording}
-          title={
-            source === "mic"
-              ? "Source: microphone — click to capture system audio (Stereo Mix)"
-              : "Source: system audio (Stereo Mix) — click to capture microphone"
-          }
+          className="send-btn"
+          onClick={send}
+          disabled={input.trim() === ""}
+          title="Send"
         >
-          {source === "mic" ? "🎤 mic" : "🔊 sys"}
-        </button>
-        <button
-          className={`mic-btn${recording ? " recording" : ""}`}
-          onClick={toggleMic}
-          title={recording ? "Stop recording" : `Record ${source === "mic" ? "voice" : "system audio"}`}
-        >
-          {recording ? "⏹" : "🎤"}
+          <IconSend />
         </button>
       </div>
     </main>

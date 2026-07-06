@@ -106,11 +106,13 @@ body {
 .mic-btn {
   flex: 0 0 auto;
   width: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-raised);
   color: var(--text);
-  font-size: 15px;
   cursor: pointer;
 }
 
@@ -118,29 +120,86 @@ body {
   border-color: var(--copper-dim);
 }
 
-.src-btn {
+.send-btn {
   flex: 0 0 auto;
-  padding: 0 8px;
+  width: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--copper);
+  border-radius: 8px;
+  background: var(--copper);
+  color: #14110e;
+  cursor: pointer;
+}
+
+.send-btn:hover {
+  background: #d0894a;
+  border-color: #d0894a;
+}
+
+.send-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.menu-wrap {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+}
+
+.menu-btn {
+  width: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-raised);
   color: var(--text-dim);
+  cursor: pointer;
+}
+
+.menu-btn:hover {
+  border-color: var(--copper-dim);
+  color: var(--text);
+}
+
+.row-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  min-width: 168px;
+  z-index: 10;
+  padding: 4px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.row-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13px;
+  text-align: left;
   white-space: nowrap;
   cursor: pointer;
 }
 
-.src-btn:hover {
-  border-color: var(--copper-dim);
-}
-
-.src-btn.sys {
+.row-menu-item:hover {
   color: var(--copper);
-  border-color: var(--copper-dim);
 }
 
-.src-btn:disabled {
+.row-menu-item:disabled {
   opacity: 0.5;
   cursor: default;
 }
