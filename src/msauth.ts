@@ -12,9 +12,14 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { load, Store } from "@tauri-apps/plugin-store";
 import { start, cancel, onUrl } from "@fabianlars/tauri-plugin-oauth";
 
-const CLIENT_ID = "233ef4ee-3fc3-40a3-bd83-1cef84ea8b90";
-const AUTHORITY = "https://login.microsoftonline.com/common/oauth2/v2.0";
-const SCOPES = "Calendars.ReadWrite offline_access User.Read";
+const CLIENT_ID = "f4c142b4-85f2-4d7d-801d-5e8c59fe0676";
+// /consumers matches this app's audience (Personal Microsoft accounts only).
+// /common would require a multi-audience registration. Both the authorize and
+// token URLs derive from this constant.
+const AUTHORITY = "https://login.microsoftonline.com/consumers/oauth2/v2.0";
+// Mail.ReadWrite (NOT Mail.Send): lets us create drafts in Outlook. Sending
+// stays a manual step the user does in Outlook.
+const SCOPES = "Calendars.ReadWrite Mail.ReadWrite offline_access User.Read";
 const GRAPH_ME = "https://graph.microsoft.com/v1.0/me";
 
 const STORE_FILE = "ms-tokens.json";
@@ -174,9 +179,9 @@ export async function login(): Promise<void> {
     authUrl.searchParams.set("scope", SCOPES);
     authUrl.searchParams.set("code_challenge", challenge);
     authUrl.searchParams.set("code_challenge_method", "S256");
-    // Force the account chooser instead of silently reusing a cached browser
-    // session, so the user picks the account whose calendar they mean (personal
-    // vs work/school). Without this, common-endpoint SSO can auth the wrong one.
+    // Show the account chooser. This app registration has Calendars.ReadWrite and
+    // Mail.ReadWrite configured from the start, so both scopes consent cleanly on
+    // first connect; no need to force the consent screen on every login.
     authUrl.searchParams.set("prompt", "select_account");
 
     await openUrl(authUrl.toString());

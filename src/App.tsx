@@ -19,6 +19,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { login, disconnect, isConnected, getAccount, refreshAccount } from "./msauth";
 import { listEvents, createEvent, deleteEvent, updateEvent } from "./calendar";
 import { transcribe } from "./transcribe";
+import { createDraft } from "./mail";
 import { writeTempAudio, removeTempAudio } from "./voice";
 import "./App.css";
 
@@ -975,6 +976,34 @@ function App() {
     ]);
   };
 
+  // TEMPORARY (email Stage 0): prove Mail.ReadWrite consent + create-draft work.
+  // Creates a hardcoded draft addressed to the connected account. Remove once the
+  // email tool is built. Shows the raw error on failure so we can see any AADSTS.
+  const testEmailDraft = async () => {
+    setRowMenuOpen(false);
+    setMessages((prev) => [...prev, { role: "intern", text: "Creating a test email draft..." }]);
+    try {
+      const account = await getAccount();
+      const to = account ? [account] : [];
+      const link = await createDraft({
+        subject: "Intern draft test",
+        body: "This is a test draft created by Intern via Microsoft Graph. Safe to delete.",
+        to,
+      });
+      console.log("draft created:", link);
+      setMessages((prev) => [
+        ...prev,
+        { role: "intern", text: `Draft created. Check your Outlook Drafts folder. (link/id logged to console)` },
+      ]);
+    } catch (e) {
+      console.error("test draft failed:", e);
+      setMessages((prev) => [
+        ...prev,
+        { role: "intern", text: `Draft creation failed: ${e instanceof Error ? e.message : String(e)}` },
+      ]);
+    }
+  };
+
   const send = async () => {
     const text = input.trim();
     if (text === "") return;
@@ -1083,6 +1112,9 @@ function App() {
               </button>
               <button className="row-menu-item" onClick={openSettings}>
                 <IconSettings /> Settings
+              </button>
+              <button className="row-menu-item" onClick={testEmailDraft}>
+                <IconFile /> Test email draft
               </button>
             </div>
           )}
