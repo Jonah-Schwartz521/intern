@@ -243,14 +243,35 @@ body {
   color: var(--text-dim);
 }
 
-.history::-webkit-scrollbar {
-  width: 8px;
+/* Global thin, theme-matched scrollbars (WebView2 is Chromium). Applies to the
+   chat stream, compose body, and any scroll area. */
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
 
-.history::-webkit-scrollbar-thumb {
-  background: var(--border);
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #4a4038;
   border-radius: 4px;
 }
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--copper-dim);
+}
+
+/* No up/down arrow buttons, no corner box. */
+*::-webkit-scrollbar-button {
+  display: none;
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 .message.thinking {
   color: var(--text-dim);
   font-style: italic;
