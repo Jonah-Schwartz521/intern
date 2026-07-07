@@ -46,6 +46,7 @@ Your job:
 - Before creating a calendar event, resolve the exact date. If the user names a vague day like "Friday" without saying which week, or gives a time that has already passed relative to the current date/time, do NOT call create_event yet. Ask a clarifying question first, e.g. "It's already past noon today, did you mean next Friday?" Confirm the actual date before booking, and never silently assume "today" or guess the week.
 - To update or delete an event you must first find it with list_events. Each event it returns includes an internal id in brackets like [id:...]. Use that id for update_event and delete_event, but never show the id to the user; it is for your use only.
 - Before deleting an event, ALWAYS confirm with the user exactly which event you will delete (by name and time) and wait for their yes. Never call delete_event on a guess or without explicit confirmation.
+- To draft an email, always call draft_email with a COMPLETE first-pass draft: a specific subject line AND a full, ready-to-edit body written from the request, with all fields prefilled. Never open a blank draft and never ask the user field by field. If you cannot identify the recipient's email address, still draft the subject and body and leave 'to' empty for the user to fill in. Only ask a question first when the request is too vague to draft anything meaningful from. After calling it, just tell the user to review and click Create draft; do not repeat the draft text.
 - Act like a sharp junior assistant: fast, low-friction, no over-explaining.`;
 
 const TOOLS = [
@@ -214,6 +215,31 @@ const TOOLS = [
       required: [],
     },
   },
+  {
+    name: "draft_email",
+    description:
+      "Draft an email for the user to review before it is created in Outlook. Use when the user asks to draft, write, or compose an email. Generate the recipient, a specific subject, and a COMPLETE first-pass body from the request, and prefill all three. Always draft; do not interrogate the user field by field. Only ask a clarifying question if something is genuinely unresolvable (for example a recipient you cannot identify), in which case leave 'to' blank for the user to fill in. This does NOT send or create the draft; it opens an editable compose card the user completes.",
+    input_schema: {
+      type: "object",
+      properties: {
+        to: {
+          type: "string",
+          description:
+            "Recipient email address(es), comma-separated. Fill this in when you know the address; if the user gave only a name you cannot resolve to an address, leave it blank for the user to complete in the card.",
+        },
+        subject: {
+          type: "string",
+          description: "A concise, specific subject line drafted from the request.",
+        },
+        body: {
+          type: "string",
+          description:
+            "The complete first-pass email body drafted from the request, ready for the user to edit. Write the full message, not a placeholder.",
+        },
+      },
+      required: ["subject", "body"],
+    },
+  },
 ];
 
 type Message = {
@@ -222,6 +248,9 @@ type Message = {
   // When set, the message is a transcript (content, not a command) and renders a
   // copy button that copies this raw text.
   copyText?: string;
+  // When set, the message renders an editable email compose card prefilled with
+  // Claude's draft; the user edits and creates the draft from there.
+  draft?: { to: string; subject: string; body: string };
 };
 
 // UI sinks so runTool (which lives outside the component) can report progress and
@@ -266,7 +295,16 @@ function pickModel(userText: string): string {
     t.includes("figure out") ||
     t.includes("which should") ||
     t.includes("plan ");
-  return longish || multiStep || reasoningWords ? OPUS : HAIKU;
+  // Drafting an email means writing a full body from scratch; use the stronger
+  // model so the compose card comes up with a complete, well-written draft.
+  const emailDraft =
+    (t.includes("email") || t.includes("e-mail")) &&
+    (t.includes("draft") ||
+      t.includes("write") ||
+      t.includes("compose") ||
+      t.includes("reply") ||
+      t.includes("respond"));
+  return longish || multiStep || reasoningWords || emailDraft ? OPUS : HAIKU;
 }
 
 async function scheduleReminderTask(text: string, due: Date): Promise<string> {
@@ -431,6 +469,19 @@ async function runTool(name: string, input: any): Promise<string> {
     } catch (e) {
       return `Could not delete the event: ${e instanceof Error ? e.message : String(e)}`;
     }
+  }
+
+  if (name === "draft_email") {
+    uiPush?.({
+      role: "intern",
+      text: "",
+      draft: {
+        to: typeof input.to === "string" ? input.to : "",
+        subject: typeof input.subject === "string" ? input.subject : "",
+        body: typeof input.body === "string" ? input.body : "",
+      },
+    });
+    return "An editable email compose card has been shown to the user. Do not repeat the draft; briefly tell them to review it and click Create draft.";
   }
 
   if (name === "transcribe_file") {
@@ -731,6 +782,68 @@ const IconSettings = () => (
     <path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" />
   </svg>
 );
+// Inline email compose card. Prefilled from Claude's draft; the user edits the
+// fields here and the edited values are what get sent to createDraft.
+function ComposeCard({
+  initial,
+  onCreate,
+}: {
+  initial: { to: string; subject: string; body: string };
+  onCreate: (fields: { to: string; subject: string; body: string }) => Promise<void>;
+}) {
+  const [to, setTo] = useState(initial.to);
+  const [subject, setSubject] = useState(initial.subject);
+  const [body, setBody] = useState(initial.body);
+  const [status, setStatus] = useState<"idle" | "creating" | "created">("idle");
+  const [error, setError] = useState("");
+
+  const create = async () => {
+    setStatus("creating");
+    setError("");
+    try {
+      await onCreate({ to, subject, body });
+      setStatus("created");
+    } catch (e) {
+      console.error("create draft failed:", e);
+      setStatus("idle");
+      setError("Could not create the draft. Try again.");
+    }
+  };
+
+  const done = status === "created";
+  return (
+    <div className="compose-card">
+      <label className="compose-label">To</label>
+      <input
+        className="compose-field"
+        value={to}
+        onChange={(e) => setTo(e.currentTarget.value)}
+        disabled={done}
+        placeholder="name@example.com"
+      />
+      <label className="compose-label">Subject</label>
+      <input
+        className="compose-field"
+        value={subject}
+        onChange={(e) => setSubject(e.currentTarget.value)}
+        disabled={done}
+      />
+      <label className="compose-label">Body</label>
+      <textarea
+        className="compose-field compose-body"
+        value={body}
+        onChange={(e) => setBody(e.currentTarget.value)}
+        disabled={done}
+      />
+      {error && <div className="compose-error">{error}</div>}
+      <div className="compose-actions">
+        <button className="compose-create" onClick={create} disabled={status !== "idle"}>
+          {done ? "Draft created" : status === "creating" ? "Creating..." : "Create draft"}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -976,40 +1089,12 @@ function App() {
     ]);
   };
 
-  // TEMPORARY (email Stage 0): prove Mail.ReadWrite consent + create-draft work.
-  // Creates a hardcoded draft addressed to the connected account. Remove once the
-  // email tool is built. Shows the raw error on failure so we can see any AADSTS.
-  const testEmailDraft = async () => {
-    setRowMenuOpen(false);
-    setMessages((prev) => [...prev, { role: "intern", text: "Creating a test email draft..." }]);
-    try {
-      const account = await getAccount();
-      const to = account ? [account] : [];
-      const webLink = await createDraft({
-        subject: "Intern draft test",
-        body: "This is a test draft created by Intern via Microsoft Graph. Safe to delete.",
-        to,
-      });
-      console.log("draft webLink:", webLink);
-      if (webLink) {
-        await openUrl(webLink);
-        setMessages((prev) => [
-          ...prev,
-          { role: "intern", text: "Draft created and opened in Outlook. Review and send it there." },
-        ]);
-      } else {
-        setMessages((prev) => [
-          ...prev,
-          { role: "intern", text: "Draft created. Check your Outlook Drafts folder." },
-        ]);
-      }
-    } catch (e) {
-      console.error("test draft failed:", e);
-      setMessages((prev) => [
-        ...prev,
-        { role: "intern", text: `Draft creation failed: ${e instanceof Error ? e.message : String(e)}` },
-      ]);
-    }
+  // Create the Outlook draft from the compose card's (edited) fields, then open
+  // it in Outlook via its webLink. Throws on failure so the card can surface it.
+  const handleCreateDraft = async (fields: { to: string; subject: string; body: string }) => {
+    const to = fields.to.split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+    const webLink = await createDraft({ subject: fields.subject, body: fields.body, to });
+    if (webLink) await openUrl(webLink);
   };
 
   const send = async () => {
@@ -1054,8 +1139,10 @@ function App() {
           <div className="empty">Ask Intern to do something.</div>
         )}
         {messages.map((msg, i) => (
-          <div key={i} className={`message ${msg.role}`}>
-            {msg.role === "intern" ? (
+          <div key={i} className={`message ${msg.role}${msg.draft ? " compose" : ""}`}>
+            {msg.draft ? (
+              <ComposeCard initial={msg.draft} onCreate={handleCreateDraft} />
+            ) : msg.role === "intern" ? (
               <div className="md">
                 {msg.copyText != null && (
                   <div className="transcript-head">
@@ -1120,9 +1207,6 @@ function App() {
               </button>
               <button className="row-menu-item" onClick={openSettings}>
                 <IconSettings /> Settings
-              </button>
-              <button className="row-menu-item" onClick={testEmailDraft}>
-                <IconFile /> Test email draft
               </button>
             </div>
           )}

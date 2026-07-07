@@ -272,6 +272,88 @@ body {
   border-color: var(--copper-dim);
 }
 
+/* Inline email compose card. */
+.message.compose {
+  max-width: 100%;
+  align-self: stretch;
+}
+
+.compose-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.compose-label {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.compose-label:not(:first-child) {
+  margin-top: 4px;
+}
+
+.compose-field {
+  width: 100%;
+  padding: 7px 9px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  outline: none;
+}
+
+.compose-field:focus {
+  border-color: var(--copper-dim);
+}
+
+.compose-field:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.compose-body {
+  min-height: 120px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.compose-error {
+  color: #d9776b;
+  font-size: 12px;
+}
+
+.compose-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+.compose-create {
+  padding: 7px 14px;
+  border: 1px solid var(--copper);
+  border-radius: 6px;
+  background: var(--copper);
+  color: #14110e;
+  font-family: var(--mono);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.compose-create:hover {
+  background: #d0894a;
+  border-color: #d0894a;
+}
+
+.compose-create:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .md > *:first-child {
   margin-top: 0;
 }
