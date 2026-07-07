@@ -1139,7 +1139,12 @@ function App() {
           <div className="empty">Ask Intern to do something.</div>
         )}
         {messages.map((msg, i) => (
-          <div key={i} className={`message ${msg.role}${msg.draft ? " compose" : ""}`}>
+          <div
+            key={i}
+            className={`message ${msg.role}${
+              msg.copyText != null || msg.draft != null ? " card" : ""
+            }${msg.draft ? " compose" : ""}`}
+          >
             {msg.draft ? (
               <ComposeCard initial={msg.draft} onCreate={handleCreateDraft} />
             ) : msg.role === "intern" ? (

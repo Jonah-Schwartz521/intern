@@ -1,7 +1,7 @@
 # Intern — Project Scope
 
-**Version:** 1.2
-**Date:** June 21, 2026
+**Version:** 1.3
+**Date:** July 6, 2026
 
 ---
 
@@ -34,7 +34,13 @@ Speak your request via microphone instead of typing. Intern transcribes your spe
 Upload or select an audio file. Intern transcribes the content and displays it as text you can copy, search, or reference.
 
 **Video Transcription**
-Point Intern at a video file (or play a video and hit a button). It extracts the audio, transcribes the spoken content, and returns clean copyable text.
+Point Intern at a video file (or play a video and hit a button). It transcribes the spoken content and returns clean copyable text.
+
+**System Audio Transcription**
+Capture and transcribe what is currently playing (a call, a video, a lecture) via the system loopback rather than the microphone. Record-then-transcribe, so it works even with the system muted or on headphones.
+
+**Email Drafting**
+Draft an email from a natural-language request. Intern generates the recipient, subject, and a full first-pass body, shows an editable compose card, then creates the draft in Outlook for you to review and send. Draft-and-handoff: Intern never sends, you send from Outlook.
 
 **Intent Parsing**
 Understand what the user actually wants, even when phrased casually or ambiguously. Clarify when needed rather than guessing.
@@ -108,12 +114,12 @@ You are Intern, the reasoning engine behind a desktop quick-task assistant. Your
 
 ## Scope Boundaries (NOT MVP)
 
-- Email integration
+- Autonomous email sending (Intern drafts and hands off; you send from Outlook)
 - Slack or Teams message sending
 - Advanced scheduling (finding mutual availability with others)
 - Autonomous task execution without confirmation
-- Web browsing or external data fetching beyond calendar and file access
-- Live real-time transcription of a video while it streams (start with file-based / playback-triggered transcription first)
+- Web browsing or external data fetching beyond calendar, mail, and file access
+- Live real-time transcription of a stream as it plays. Record-then-transcribe (files, voice, and system audio) is in scope; transcribing a live stream in real time is not.
 
 ---
 

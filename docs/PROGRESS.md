@@ -2,36 +2,44 @@
 
 Living log of what is built and what is next. Update at the end of every session.
 
-## Status: Shell working (hotkey toggle live)
+## Status: MVP feature-complete (end-to-end test + polish remain)
 
 ## MVP Checklist
 
-- [x] Scaffold Tauri app (create-tauri-app, Vue or React + TS)
-- [x] Register global hotkey (global-shortcut plugin) + window summoning
-- [x] Minimal chat UI (input + history)
-- [ ] Claude API client wired (HTTP) + intent routing
-- [ ] Intent parsing: calendar create
-- [ ] Intent parsing: reminder set
-- [ ] Intent parsing: file search
-- [~] Outlook auth (Microsoft Graph, PKCE) — code complete, pending live login test
-- [ ] Calendar API read access (list_events)
-- [ ] Calendar API write access (create_event)
-- [ ] Voice input (mic -> speech-to-text -> intent)
-- [ ] Audio file transcription
-- [ ] Video transcription (ffmpeg via shell plugin -> speech-to-text)
-- [ ] End-to-end test of full flow
+- [x] Scaffold Tauri app (React + TS)
+- [x] Global hotkey (Ctrl+Shift+Space) + window summoning, tray residence, close-to-tray
+- [x] Minimal chat UI (input + history), Markdown-rendered replies, custom frameless titlebar
+- [x] Claude API client (HTTP) + intent routing (Haiku default, Opus escalation) + prompt caching
+- [x] Reminders (Windows Task Scheduler via schtasks)
+- [x] File search + open (PowerShell Get-ChildItem, opener plugin)
+- [x] Outlook auth (Microsoft Graph, PKCE, personal account, /consumers endpoint)
+- [x] Calendar: list / create / update / delete events (Graph)
+- [x] Stateful Outlook connection control (titlebar pill)
+- [x] File transcription (bundled Const-me/Whisper + ggml-base.bin, no ffmpeg, no network)
+- [x] Voice input (mic -> mp4/AAC -> whisper -> input box)
+- [x] System audio capture (Stereo Mix loopback -> transcript bubble)
+- [x] Input row redesign (send-default, mic + voice/system source, overflow menu)
+- [x] Email drafting (Graph create-draft, inline prefilled compose card, opens via webLink)
+- [ ] End-to-end test of the full flow
 
-## Done
+## Done (highlights, most recent session)
 
-- Scaffolded Tauri + React + TS app, toolchain working on Windows (Rust, Node, WebView2)
-- Global hotkey toggle: Ctrl+Shift+Space shows/hides the window from anywhere. global-shortcut plugin wired (Cargo.toml + lib.rs + package.json + capability permissions), window show/hide/focus permissions granted, useEffect cleanup prevents double-registration.
+- **File transcription:** bundled Const-me/Whisper (GPU, Direct3D) + ggml-base.bin, both shipped as `$RESOURCE`-bundled Tauri resources. No ffmpeg (Media Foundation decodes mp3/mp4/wav directly), no network download.
+- **Voice input:** mic -> MediaRecorder `audio/mp4` -> whisper -> transcript dropped into the input box (a command to review and send).
+- **System audio:** Stereo Mix loopback deviceId -> whisper -> transcript bubble. Verified clean off muted/headphone playback (real digital loopback, not acoustic pickup).
+- **Input row redesign:** `[mic] [overflow menu] [input] [send]`; source (voice/system) and Transcribe file live in the overflow menu.
+- **Email drafting:** `draft_email` tool -> inline prefilled compose card (editable To/Subject/Body) -> Graph create-draft -> opens the draft via webLink in Outlook. Draft-and-handoff (no Mail.Send). Escalates to Opus.
+
+(Earlier: hotkey + tray, chat UI, reminders, file search/open, Outlook calendar CRUD, autostart, Markdown rendering, model routing + prompt caching.)
 
 ## Next Up
 
-1. Test Outlook login: `npm run tauri dev`, click "Connect Outlook", complete browser sign-in, confirm token logs to console. (First run downloads 3 new Rust crates.)
-2. Once login verified: add `list_events` tool (Graph calendarview).
-3. Then `create_event` tool (Graph POST /me/events), and remove the temporary Connect Outlook button.
+1. **End-to-end test of the full flow** (exercise every tool in one session).
+2. **Settings panel** (the overflow menu item is currently a placeholder that says "not available yet").
+3. **Distribution:** `tauri build` a real installer and verify the bundled binaries + model resolve via `$RESOURCE` in an installed build (so far only run via `tauri dev`).
 
 ## Notes / Blockers
 
-(none yet)
+- **Stereo Mix (system audio) ships DISABLED by default** on most Windows machines. Fine for personal use; a distributable build would need a manual-enable step or guidance.
+- **Const-me/Whisper is pinned to its last release (1.12.0, 2023)** - functional but stale.
+- See PROJECT_MEMORY.md for the transcription decisions and the Azure app-registration saga.
