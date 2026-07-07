@@ -116,17 +116,16 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: transparent;
+  background: var(--bg-raised);
   color: var(--text-dim);
   cursor: pointer;
 }
 
 .mic-btn:hover,
 .mic-btn:focus-visible {
-  background: var(--bg-raised);
-  border-color: var(--border);
+  border-color: var(--copper-dim);
   color: var(--text);
 }
 
@@ -164,17 +163,16 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: transparent;
+  background: var(--bg-raised);
   color: var(--text-dim);
   cursor: pointer;
 }
 
 .menu-btn:hover,
 .menu-btn:focus-visible {
-  background: var(--bg-raised);
-  border-color: var(--border);
+  border-color: var(--copper-dim);
   color: var(--text);
 }
 

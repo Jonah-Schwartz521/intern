@@ -282,6 +282,14 @@ async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
+// The model keeps emitting em dashes despite the system-prompt rule, so strip
+// them deterministically from anything Claude generates before it reaches the
+// UI. Project rule: no em dashes ever. Replaces em dash (and the horizontal bar)
+// plus surrounding whitespace with a comma.
+function stripEmDashes(text: string): string {
+  return text.replace(/\s*[—―]\s*/g, ", ");
+}
+
 function pickModel(userText: string): string {
   const t = userText.toLowerCase();
   const longish = userText.length > 240;
@@ -478,8 +486,8 @@ async function runTool(name: string, input: any): Promise<string> {
       text: "",
       draft: {
         to: typeof input.to === "string" ? input.to : "",
-        subject: typeof input.subject === "string" ? input.subject : "",
-        body: typeof input.body === "string" ? input.body : "",
+        subject: typeof input.subject === "string" ? stripEmDashes(input.subject) : "",
+        body: typeof input.body === "string" ? stripEmDashes(input.body) : "",
       },
     });
     return "An editable email compose card has been shown to the user. Do not repeat the draft; briefly tell them to review it and click Create draft.";
@@ -587,7 +595,7 @@ async function askClaude(history: Message[]): Promise<string> {
     }
 
     const textBlock = data.content.find((b: any) => b.type === "text");
-    return textBlock ? textBlock.text : "(no response)";
+    return textBlock ? stripEmDashes(textBlock.text) : "(no response)";
   }
 }
 
