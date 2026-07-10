@@ -140,11 +140,17 @@ body {
   background: var(--copper);
   color: #14110e;
   cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
 }
 
 .send-btn:hover {
   background: #d0894a;
   border-color: #d0894a;
+  transform: scale(1.05);
+}
+
+.send-btn:active:not(:disabled) {
+  transform: scale(0.96);
 }
 
 .send-btn:disabled {

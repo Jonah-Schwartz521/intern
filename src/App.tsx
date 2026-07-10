@@ -757,10 +757,8 @@ const IconStop = () => (
   </svg>
 );
 const IconSend = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M12 5l0 14" />
-    <path d="M16 9l-4 -4" />
-    <path d="M8 9l4 -4" />
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path transform="rotate(-45 12 12)" d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z" />
   </svg>
 );
 const IconDots = () => (
