@@ -21,6 +21,18 @@ import { listEvents, createEvent, deleteEvent, updateEvent } from "./calendar";
 import { transcribe } from "./transcribe";
 import { createDraft } from "./mail";
 import { writeTempAudio, removeTempAudio } from "./voice";
+import {
+  type Message,
+  type Session,
+  newSessionId,
+  loadSessions,
+  getCurrentId,
+  setCurrentId,
+  saveSession,
+  listSessions,
+  sessionTitle,
+  formatSessionTime,
+} from "./session";
 import "./App.css";
 
 const HOTKEY = "CmdOrCtrl+Shift+Space";
@@ -242,17 +254,6 @@ const TOOLS = [
     },
   },
 ];
-
-type Message = {
-  role: "user" | "intern";
-  text: string;
-  // When set, the message is a transcript (content, not a command) and renders a
-  // copy button that copies this raw text.
-  copyText?: string;
-  // When set, the message renders an editable email compose card prefilled with
-  // Claude's draft; the user edits and creates the draft from there.
-  draft?: { to: string; subject: string; body: string };
-};
 
 // UI sinks so runTool (which lives outside the component) can report progress and
 // push a message. Registered by the App component on mount.
@@ -599,6 +600,55 @@ async function askClaude(history: Message[]): Promise<string> {
   }
 }
 
+// Generate a short 3-5 word title for a conversation via Haiku. Deliberately
+// cheap: no tools, no big cached system prompt, tiny max_tokens, and only the
+// opening turns (trimmed) are sent. Returns null on any failure so the caller
+// just keeps the placeholder title. Cost per conversation: one small Haiku call.
+async function generateTitle(history: Message[]): Promise<string | null> {
+  const transcript = history
+    .slice(0, 6)
+    .map((m) => `${m.role === "intern" ? "Intern" : "User"}: ${m.text.slice(0, 300)}`)
+    .join("\n");
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": import.meta.env.VITE_ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+      },
+      body: JSON.stringify({
+        model: HAIKU,
+        max_tokens: 16,
+        system:
+          "Write a 3 to 5 word title summarizing the conversation. Reply with only the title: no quotes, no trailing punctuation, no emojis.",
+        messages: [{ role: "user", content: transcript }],
+      }),
+    });
+
+    if (!response.ok) {
+      console.error("title API", response.status, await response.text());
+      return null;
+    }
+
+    const data = await response.json();
+    const block = data.content?.find((b: any) => b.type === "text");
+    let title: string = block?.text ?? "";
+    title = stripEmDashes(title)
+      .trim()
+      .replace(/^["']+|["']+$/g, "")
+      .replace(/[.]+$/, "")
+      .trim();
+    if (title.length > 60) title = title.slice(0, 60).trim();
+    return title || null;
+  } catch (e) {
+    console.error("title generation request failed:", e);
+    return null;
+  }
+}
+
 type ConnState = "disconnected" | "connecting" | "connected";
 
 // Middle-truncate an email so the domain stays visible, e.g.
@@ -775,6 +825,18 @@ const IconVolume = () => (
     <path d="M6 15h-2a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1h2l3.5 -4.5a.8 .8 0 0 1 1.5 .5v14a.8 .8 0 0 1 -1.5 .5l-3.5 -4.5" />
   </svg>
 );
+const IconPlus = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 5l0 14" />
+    <path d="M5 12l14 0" />
+  </svg>
+);
+const IconHistory = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 8l0 4l2 2" />
+    <path d="M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5" />
+  </svg>
+);
 const IconFile = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M14 3v4a1 1 0 0 0 1 1h4" />
@@ -860,10 +922,31 @@ function App() {
   const [recording, setRecording] = useState(false);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [rowMenuOpen, setRowMenuOpen] = useState(false);
+  // Stage 2: the inline /resume list (null when closed) and a transient one-line
+  // notice for command feedback (e.g. unknown command). Neither is persisted.
+  const [resumeSessions, setResumeSessions] = useState<Session[] | null>(null);
+  const [notice, setNotice] = useState("");
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const rowMenuRef = useRef<HTMLDivElement>(null);
+  // Persistence: the current conversation's id and creation time. loadedRef gates
+  // saving until the initial restore is done, so we never clobber saved history
+  // with the empty starting state.
+  const sessionIdRef = useRef<string>("");
+  const createdAtRef = useRef<number>(0);
+  const loadedRef = useRef(false);
+  // Snapshot of the last-persisted messages so restoring on launch (or any
+  // no-op render) does not rewrite the session and bump its timestamp.
+  const lastSavedRef = useRef<string>("");
+  // Stage 3: the current conversation's generated title (cached, never
+  // regenerated) and a flag so we only fire one title request at a time.
+  const titleRef = useRef<string | undefined>(undefined);
+  const titleBusyRef = useRef(false);
+  // Always-current messages, so async work (title generation) persists the
+  // latest state instead of a stale snapshot captured when it started.
+  const messagesRef = useRef<Message[]>(messages);
+  messagesRef.current = messages;
 
   // Let runTool report progress and push messages into this component.
   useEffect(() => {
@@ -874,6 +957,89 @@ function App() {
       uiPush = null;
     };
   }, []);
+
+  // On launch, restore the last active conversation from disk. If there is none,
+  // start a fresh session and mark it current.
+  useEffect(() => {
+    (async () => {
+      try {
+        const curId = await getCurrentId();
+        if (curId) {
+          const all = await loadSessions();
+          const cur = all[curId];
+          if (cur) {
+            sessionIdRef.current = cur.id;
+            createdAtRef.current = cur.createdAt;
+            titleRef.current = cur.title;
+            lastSavedRef.current = JSON.stringify(cur.messages);
+            setMessages(cur.messages);
+            loadedRef.current = true;
+            return;
+          }
+        }
+        const id = newSessionId();
+        sessionIdRef.current = id;
+        createdAtRef.current = Date.now();
+        await setCurrentId(id);
+      } catch (e) {
+        console.error("session restore failed:", e);
+        sessionIdRef.current = sessionIdRef.current || newSessionId();
+        createdAtRef.current = createdAtRef.current || Date.now();
+      } finally {
+        loadedRef.current = true;
+      }
+    })();
+  }, []);
+
+  // Persist the conversation whenever it changes. Skipped until the initial
+  // restore finishes, and for empty conversations so throwaway sessions do not
+  // litter the store.
+  useEffect(() => {
+    if (!loadedRef.current || !sessionIdRef.current || messages.length === 0) return;
+    const snapshot = JSON.stringify(messages);
+    if (snapshot === lastSavedRef.current) return;
+    lastSavedRef.current = snapshot;
+    const session: Session = {
+      id: sessionIdRef.current,
+      createdAt: createdAtRef.current,
+      updatedAt: Date.now(),
+      title: titleRef.current,
+      messages,
+    };
+    saveSession(session).catch((e) => console.error("session save failed:", e));
+  }, [messages]);
+
+  // Generate a short title once a conversation has real substance (3+ messages).
+  // Cached on the session and never regenerated, so throwaway chats stay
+  // untitled and each conversation costs at most one tiny Haiku call.
+  useEffect(() => {
+    if (!loadedRef.current || titleRef.current || titleBusyRef.current) return;
+    if (messages.length < 3 || !sessionIdRef.current) return;
+    const sid = sessionIdRef.current;
+    titleBusyRef.current = true;
+    (async () => {
+      try {
+        const title = await generateTitle(messagesRef.current);
+        // Bail if the user switched conversations while we were waiting.
+        if (!title || sessionIdRef.current !== sid) return;
+        titleRef.current = title;
+        // Save the latest messages (not a stale snapshot) with the new title.
+        const latest = messagesRef.current;
+        await saveSession({
+          id: sid,
+          createdAt: createdAtRef.current,
+          updatedAt: Date.now(),
+          title,
+          messages: latest,
+        });
+        lastSavedRef.current = JSON.stringify(latest);
+      } catch (e) {
+        console.error("title generation failed:", e);
+      } finally {
+        titleBusyRef.current = false;
+      }
+    })();
+  }, [messages]);
 
   // Close the overflow menu when clicking outside it.
   useEffect(() => {
@@ -1104,10 +1270,97 @@ function App() {
     if (webLink) await openUrl(webLink);
   };
 
+  // Persist the current conversation to the store if it has content and differs
+  // from what was last saved. Shared by the new-conversation and resume flows so
+  // switching away never loses in-progress work.
+  const persistCurrent = async () => {
+    if (messages.length === 0 || !sessionIdRef.current) return;
+    const snapshot = JSON.stringify(messages);
+    if (snapshot === lastSavedRef.current) return;
+    lastSavedRef.current = snapshot;
+    await saveSession({
+      id: sessionIdRef.current,
+      createdAt: createdAtRef.current,
+      updatedAt: Date.now(),
+      title: titleRef.current,
+      messages,
+    });
+  };
+
+  // Start a fresh conversation. CRITICAL: save the current one first so nothing
+  // in progress is lost, then clear the view onto a brand new session.
+  const startNewConversation = async () => {
+    setRowMenuOpen(false);
+    await persistCurrent();
+    const id = newSessionId();
+    sessionIdRef.current = id;
+    createdAtRef.current = Date.now();
+    titleRef.current = undefined;
+    lastSavedRef.current = "";
+    await setCurrentId(id);
+    setMessages([]);
+    setInput("");
+    setResumeSessions(null);
+    setNotice("");
+  };
+
+  // Open the inline list of saved conversations. Excludes the one we are in and
+  // any empty sessions.
+  const openResumeList = async () => {
+    setRowMenuOpen(false);
+    setNotice("");
+    await persistCurrent();
+    const all = await listSessions();
+    setResumeSessions(
+      all.filter((s) => s.id !== sessionIdRef.current && s.messages.length > 0),
+    );
+  };
+
+  // Load a saved conversation into the view. Saves the current one first (same
+  // reason as new-conversation) before switching.
+  const loadConversation = async (sess: Session) => {
+    await persistCurrent();
+    sessionIdRef.current = sess.id;
+    createdAtRef.current = sess.createdAt;
+    titleRef.current = sess.title;
+    lastSavedRef.current = JSON.stringify(sess.messages);
+    await setCurrentId(sess.id);
+    setMessages(sess.messages);
+    setResumeSessions(null);
+    setNotice("");
+  };
+
+  // Slash-command registry. Extensible: add a name here and it works from the
+  // input box, no other wiring needed.
+  const commands: Record<string, { description: string; run: () => void | Promise<void> }> = {
+    resume: { description: "Browse and reopen past conversations", run: openResumeList },
+    new: { description: "Start a new conversation", run: startNewConversation },
+  };
+
+  const runCommand = async (raw: string) => {
+    const name = raw.slice(1).split(/\s+/)[0].toLowerCase();
+    const cmd = commands[name];
+    if (!cmd) {
+      setResumeSessions(null);
+      setNotice(`Unknown command: /${name}. Try /resume or /new.`);
+      return;
+    }
+    await cmd.run();
+  };
+
   const send = async () => {
     const text = input.trim();
     if (text === "") return;
 
+    // Slash commands are handled locally and never sent to Claude.
+    if (text.startsWith("/")) {
+      setInput("");
+      await runCommand(text);
+      return;
+    }
+
+    setResumeSessions(null);
+    setNotice("");
     const newHistory: Message[] = [...messages, { role: "user", text }];
     setMessages(newHistory);
     setInput("");
@@ -1189,6 +1442,26 @@ function App() {
             )}
           </div>
         ))}
+        {resumeSessions !== null && (
+          <div className="resume-list">
+            <div className="resume-head">Saved conversations</div>
+            {resumeSessions.length === 0 ? (
+              <div className="resume-empty">No saved conversations yet.</div>
+            ) : (
+              resumeSessions.map((s) => (
+                <button
+                  key={s.id}
+                  className="resume-item"
+                  onClick={() => loadConversation(s)}
+                >
+                  <span className="resume-title">{sessionTitle(s)}</span>
+                  <span className="resume-time">{formatSessionTime(s.updatedAt)}</span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
+        {notice && <div className="notice">{notice}</div>}
         {thinking && (
           <div className="message intern thinking">{status || "..."}</div>
         )}
@@ -1211,6 +1484,12 @@ function App() {
           </button>
           {rowMenuOpen && (
             <div className="row-menu">
+              <button className="row-menu-item" onClick={startNewConversation}>
+                <IconPlus /> New conversation
+              </button>
+              <button className="row-menu-item" onClick={openResumeList}>
+                <IconHistory /> Resume conversation
+              </button>
               <button className="row-menu-item" onClick={() => startRecording("system")} disabled={recording}>
                 <IconVolume /> System audio
               </button>

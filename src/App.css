@@ -610,3 +610,66 @@ body {
 .oa-menu-item:hover {
   color: var(--copper);
 }
+
+/* Inline /resume list of saved conversations. Rendered in the stream, no modal. */
+.resume-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+}
+
+.resume-head {
+  color: var(--text-dim);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 4px 6px 2px;
+}
+
+.resume-empty {
+  color: var(--text-dim);
+  font-size: 13px;
+  padding: 6px;
+}
+
+.resume-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.resume-item:hover {
+  background: var(--bg-raised);
+}
+
+.resume-title {
+  min-width: 0;
+  word-break: break-word;
+}
+
+.resume-time {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+/* Transient command feedback (e.g. unknown command). */
+.notice {
+  color: var(--text-dim);
+  font-size: 13px;
+  font-style: italic;
+}
