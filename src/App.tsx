@@ -21,6 +21,7 @@ import { listEvents, createEvent, deleteEvent, updateEvent } from "./calendar";
 import { transcribe } from "./transcribe";
 import { createDraft } from "./mail";
 import { writeTempAudio, removeTempAudio } from "./voice";
+import { summonWindow } from "./summon";
 import {
   type Message,
   type Session,
@@ -926,6 +927,10 @@ function App() {
   // notice for command feedback (e.g. unknown command). Neither is persisted.
   const [resumeSessions, setResumeSessions] = useState<Session[] | null>(null);
   const [notice, setNotice] = useState("");
+  // Command palette: highlighted row and whether the user dismissed it (Escape)
+  // for the current draft. Which commands show is derived from the registry.
+  const [paletteIdx, setPaletteIdx] = useState(0);
+  const [paletteDismissed, setPaletteDismissed] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -1053,6 +1058,14 @@ function App() {
     return () => document.removeEventListener("mousedown", onDown);
   }, [rowMenuOpen]);
 
+  // Focus the input so the user can type the moment the window appears. The
+  // webview only takes keyboard focus after the OS hands the window focus back,
+  // so the first attempt can land too early: retry once on the next frame.
+  const focusInput = () => {
+    inputRef.current?.focus();
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
   useEffect(() => {
     const setup = async () => {
       await register(HOTKEY, async (event: ShortcutEvent) => {
@@ -1062,8 +1075,8 @@ function App() {
         if (visible) {
           await appWindow.hide();
         } else {
-          await appWindow.show();
-          await appWindow.setFocus();
+          await summonWindow();
+          focusInput();
         }
       });
 
@@ -1348,6 +1361,26 @@ function App() {
     await cmd.run();
   };
 
+  // Pick a command from the palette: clear the draft and run it.
+  const selectCommand = async (name: string) => {
+    setInput("");
+    setPaletteIdx(0);
+    setPaletteDismissed(false);
+    await commands[name]?.run();
+  };
+
+  // Command palette state, derived entirely from the registry so any command
+  // added to `commands` shows up automatically. Open while the draft is a bare
+  // "/" plus command chars (no spaces) and at least one command matches.
+  const isCommandDraft = /^\/\S*$/.test(input);
+  const paletteItems = isCommandDraft
+    ? Object.entries(commands)
+        .map(([name, meta]) => ({ name, description: meta.description }))
+        .filter((c) => c.name.startsWith(input.slice(1).toLowerCase()))
+    : [];
+  const paletteOpen = isCommandDraft && !paletteDismissed && paletteItems.length > 0;
+  const paletteActiveIdx = Math.min(paletteIdx, paletteItems.length - 1);
+
   const send = async () => {
     const text = input.trim();
     if (text === "") return;
@@ -1466,7 +1499,27 @@ function App() {
           <div className="message intern thinking">{status || "..."}</div>
         )}
       </div>
-      <div className="input-row">
+      <div className="input-area">
+        {paletteOpen && (
+          <div className="cmd-palette" role="listbox">
+            {paletteItems.map((c, i) => (
+              <button
+                key={c.name}
+                type="button"
+                role="option"
+                aria-selected={i === paletteActiveIdx}
+                className={`cmd-item${i === paletteActiveIdx ? " active" : ""}`}
+                onMouseEnter={() => setPaletteIdx(i)}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => selectCommand(c.name)}
+              >
+                <span className="cmd-name">/{c.name}</span>
+                <span className="cmd-desc">{c.description}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="input-row">
         <button
           className={`mic-btn${recording ? " recording" : ""}`}
           onClick={toggleMic}
@@ -1491,7 +1544,7 @@ function App() {
                 <IconHistory /> Resume conversation
               </button>
               <button className="row-menu-item" onClick={() => startRecording("system")} disabled={recording}>
-                <IconVolume /> System audio
+                <IconVolume /> Transcribe Audio
               </button>
               <button className="row-menu-item" onClick={transcribeFileFromMenu}>
                 <IconFile /> Transcribe file
@@ -1506,8 +1559,34 @@ function App() {
           ref={inputRef}
           className="input"
           value={input}
-          onChange={(e) => setInput(e.currentTarget.value)}
+          onChange={(e) => {
+            setInput(e.currentTarget.value);
+            setPaletteIdx(0);
+            setPaletteDismissed(false);
+          }}
           onKeyDown={(e) => {
+            if (paletteOpen) {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setPaletteIdx((i) => Math.min(i + 1, paletteItems.length - 1));
+                return;
+              }
+              if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setPaletteIdx((i) => Math.max(i - 1, 0));
+                return;
+              }
+              if (e.key === "Enter") {
+                e.preventDefault();
+                selectCommand(paletteItems[paletteActiveIdx].name);
+                return;
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                setPaletteDismissed(true);
+                return;
+              }
+            }
             if (e.key === "Enter") send();
           }}
           placeholder="Ask Intern..."
@@ -1521,6 +1600,7 @@ function App() {
         >
           <IconSend />
         </button>
+        </div>
       </div>
     </main>
   );
