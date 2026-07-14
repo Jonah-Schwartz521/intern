@@ -22,6 +22,7 @@
     "core:window:allow-start-dragging",
     "notification:default",
     "dialog:allow-open",
+    "clipboard-manager:allow-read-text",
     {
       "identifier": "fs:allow-write-file",
       "allow": [{ "path": "$TEMP/intern-voice-input.*" }]

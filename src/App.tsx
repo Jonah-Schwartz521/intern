@@ -22,6 +22,7 @@ import { transcribe } from "./transcribe";
 import { createDraft } from "./mail";
 import { writeTempAudio, removeTempAudio } from "./voice";
 import { summonWindow } from "./summon";
+import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import {
   type Message,
   type Session,
@@ -42,6 +43,11 @@ const HOTKEY = "CmdOrCtrl+Shift+Space";
 // audio), and skipped before hitting whisper.
 const MIN_AUDIO_BYTES = 2048;
 
+// Cap on how much clipboard text is sent to the model. Long enough for a stack
+// trace, a config file, or an article; short enough that a stray copy of a huge
+// document does not blow up the token bill.
+const MAX_CLIPBOARD_CHARS = 8000;
+
 const HAIKU = "claude-haiku-4-5-20251001";
 const OPUS = "claude-opus-4-8";
 
@@ -60,6 +66,9 @@ Your job:
 - To update or delete an event you must first find it with list_events. Each event it returns includes an internal id in brackets like [id:...]. Use that id for update_event and delete_event, but never show the id to the user; it is for your use only.
 - Before deleting an event, ALWAYS confirm with the user exactly which event you will delete (by name and time) and wait for their yes. Never call delete_event on a guess or without explicit confirmation.
 - To draft an email, always call draft_email with a COMPLETE first-pass draft: a specific subject line AND a full, ready-to-edit body written from the request, with all fields prefilled. Never open a blank draft and never ask the user field by field. If you cannot identify the recipient's email address, still draft the subject and body and leave 'to' empty for the user to fill in. Only ask a question first when the request is too vague to draft anything meaningful from. After calling it, just tell the user to review and click Create draft; do not repeat the draft text.
+- THE CLIPBOARD IS THE DEFAULT REFERENT. This is a hard rule, not a preference. If the user's message contains a demonstrative ("this", "that", "it", "these", "those") and nothing earlier in the conversation is clearly what it points at, they mean whatever they just copied. ALWAYS call read_clipboard first, before saying anything. Examples that must always call it: "format this", "explain this error", "summarize this", "what's wrong with this code", "fix the grammar in this", "what does this do", "clean it up". Never respond to a demonstrative by asking what they mean ("what do you want me to format?", "what should I look at?", "please paste it"); read the clipboard and act on it. The only case where you skip read_clipboard is when the referent is unmistakably already in the conversation: a file you just found, an event you just listed, a draft you just wrote.
+- read_clipboard is stateless. Every call reads the clipboard fresh and returns exactly what is on it at that moment. It has no memory, no cache, and no way to tell whether the contents changed since a previous call. So never talk about the clipboard being unchanged, stale, or having "nothing new"; if the tool returns text, act on that text, even when it is identical to something you read earlier in the conversation.
+- When your reply IS content the user will take somewhere else (reformatted JSON, rewritten or corrected text, fixed code), return that content on its own in a single fenced code block, with at most one short lead-in line and no commentary after it. Plain answers, explanations, and summaries stay as normal prose with no code fence.
 - Act like a sharp junior assistant: fast, low-friction, no over-explaining.
 - Never use em dashes in your responses. Use commas, colons, or parentheses instead.`;
 
@@ -230,6 +239,16 @@ const TOOLS = [
     },
   },
   {
+    name: "read_clipboard",
+    description:
+      "Read whatever text is on the user's clipboard right now. Stateless: each call re-reads the clipboard and returns its current contents. There is no cache, no history, and no change detection, so this tool cannot tell you whether the contents are new or the same as before; it just returns the text. ALWAYS call it when the user's message contains a demonstrative ('this', 'that', 'it', 'these') that nothing earlier in the conversation clearly explains: 'format this', 'explain this error', 'summarize this', 'what's wrong with this code', 'fix the grammar in this', 'what does this do'. The clipboard is the default referent for those words. Call it instead of asking the user what they mean or asking them to paste.",
+    input_schema: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+  },
+  {
     name: "draft_email",
     description:
       "Draft an email for the user to review before it is created in Outlook. Use when the user asks to draft, write, or compose an email. Generate the recipient, a specific subject, and a COMPLETE first-pass body from the request, and prefill all three. Always draft; do not interrogate the user field by field. Only ask a clarifying question if something is genuinely unresolvable (for example a recipient you cannot identify), in which case leave 'to' blank for the user to fill in. This does NOT send or create the draft; it opens an editable compose card the user completes.",
@@ -290,6 +309,20 @@ async function copyToClipboard(text: string): Promise<boolean> {
 // plus surrounding whitespace with a comma.
 function stripEmDashes(text: string): string {
   return text.replace(/\s*[—―]\s*/g, ", ");
+}
+
+// A reply that is essentially one fenced block (reformatted JSON, rewritten
+// text, fixed code) is content the user wants to take somewhere else, so it gets
+// the copyable bubble treatment. A reply that merely mentions a snippet inside a
+// longer explanation is prose, and stays unboxed. Returns the raw block, or
+// undefined when the reply is prose.
+function takeawayContent(reply: string): string | undefined {
+  const fences = [...reply.matchAll(/```[^\n]*\n([\s\S]*?)```/g)];
+  if (fences.length !== 1) return undefined;
+  const body = fences[0][1].trim();
+  if (!body) return undefined;
+  // The block has to carry most of the reply; a short lead-in line is fine.
+  return body.length >= reply.length * 0.6 ? body : undefined;
 }
 
 function pickModel(userText: string): string {
@@ -482,6 +515,29 @@ async function runTool(name: string, input: any): Promise<string> {
     }
   }
 
+  if (name === "read_clipboard") {
+    let text: string | null;
+    try {
+      text = await readText();
+    } catch (e) {
+      // The plugin throws when the clipboard holds something that is not text
+      // (an image, a file, a copied cell range). That is not an error worth
+      // dumping, so answer plainly.
+      console.error("read_clipboard failed:", e);
+      return "The clipboard does not have any text on it right now. Tell the user that, in one line.";
+    }
+    if (!text || !text.trim()) {
+      return "The clipboard is empty. Tell the user that, in one line.";
+    }
+    if (text.length > MAX_CLIPBOARD_CHARS) {
+      return `Clipboard contents, read just now (truncated to the first ${MAX_CLIPBOARD_CHARS} characters of ${text.length}). Act on this:\n\n${text.slice(
+        0,
+        MAX_CLIPBOARD_CHARS
+      )}`;
+    }
+    return `Clipboard contents, read just now. Act on this:\n\n${text}`;
+  }
+
   if (name === "draft_email") {
     uiPush?.({
       role: "intern",
@@ -557,7 +613,10 @@ async function askClaude(history: Message[]): Promise<string> {
       },
       body: JSON.stringify({
         model: model,
-        max_tokens: 1024,
+        // Reformatting or rewriting a clipboard payload echoes it back, so 1024
+        // was low enough to cut a mid-size JSON blob off. Output bills per token
+        // actually generated, so a higher cap costs nothing on short answers.
+        max_tokens: 2048,
         system: [
           {
             type: "text",
@@ -1401,7 +1460,10 @@ function App() {
 
     try {
       const reply = await askClaude(newHistory);
-      setMessages((prev) => [...prev, { role: "intern", text: reply }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: "intern", text: reply, copyText: takeawayContent(reply) },
+      ]);
     } catch (e) {
       setMessages((prev) => [
         ...prev,

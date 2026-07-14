@@ -17,6 +17,7 @@ pub fn run() {
         .plugin(tauri_plugin_oauth::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             let show = MenuItemBuilder::new("Show Intern").id("show").build(app)?;
             let quit = MenuItemBuilder::new("Quit").id("quit").build(app)?;

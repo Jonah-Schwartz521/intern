@@ -20,6 +20,7 @@ Living log of what is built and what is next. Update at the end of every session
 - [x] System audio capture (Stereo Mix loopback -> transcript bubble)
 - [x] Input row redesign (send-default, mic + voice/system source, overflow menu)
 - [x] Email drafting (Graph create-draft, inline prefilled compose card, opens via webLink)
+- [x] Clipboard as an input (read_clipboard tool: "explain this error", "format this", "summarize this")
 - [ ] End-to-end test of the full flow
 
 ## Done (highlights, most recent session)
@@ -38,6 +39,11 @@ Living log of what is built and what is next. Update at the end of every session
 - [x] **Stage 2, `/` command system + `/resume` list.** Input starting with `/` routes through a command registry (`commands` map in `App.tsx`) instead of Claude; unknown commands show a transient notice. `/resume` renders an inline list (no modal) of saved conversations (placeholder title = first user message truncated, plus timestamp), each row loads that conversation. `/new` and two overflow-menu buttons (New conversation, Resume conversation) start a fresh session. All switch paths call `persistCurrent()` first so the outgoing conversation is saved before the view is cleared.
 - [x] **Command palette.** Typing `/` at the start of an empty input opens a small dropdown above the input row, listing every command in the registry with a one-line description. Filters as you type (`/re` narrows), arrow keys navigate, Enter or click runs, Escape or deleting the `/` dismisses. Derived from the `commands` map, so a new command appears in the palette with no extra wiring.
 - [x] **Stage 3, auto-generated titles.** When a conversation reaches 3+ messages and has no title yet, `generateTitle()` makes one small Haiku call (no tools, no cached system prompt, `max_tokens: 16`, only the trimmed opening turns sent) and caches the 3-5 word result on the session. Never regenerated; conversations under 3 messages stay on the first-message placeholder. `sessionTitle()` prefers the stored title, so the `/resume` list shows generated titles automatically. Cost: one tiny Haiku call per titled conversation.
+
+## Done: clipboard as a first-class input
+
+- [x] **`read_clipboard` tool.** `@tauri-apps/plugin-clipboard-manager` (read-only permission), wired the standard four places (Cargo.toml, lib.rs, package.json, capability). A system-prompt rule teaches Claude that a demonstrative with no referent in the conversation ("explain this error", "format this JSON", "summarize this") means the clipboard, so it calls the tool instead of asking the user to paste. Empty or non-text clipboards answer in one line rather than dumping an error. Clipboard text is capped at 8,000 characters before it is sent to the model.
+- [x] **Copyable output for takeaway content.** A reply that is essentially one fenced block (reformatted JSON, rewritten text, fixed code) renders as a copy-button bubble; prose answers stay unboxed. `max_tokens` went 1024 -> 2048 so echoing a mid-size payload back is not truncated.
 
 ## Done: Spotlight-style summoning
 
