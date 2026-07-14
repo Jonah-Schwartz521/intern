@@ -717,6 +717,55 @@ body {
   font-size: 11px;
 }
 
+/* Inline confirmation for a destructive command (/clear). Same no-modal
+   treatment as the resume list: it lives in the stream, not over it. */
+.confirm-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--copper-dim);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.confirm-text {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.confirm-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.confirm-btn {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.confirm-btn:hover {
+  color: var(--text);
+  border-color: var(--copper-dim);
+}
+
+.confirm-btn.danger {
+  border-color: var(--copper);
+  color: var(--copper);
+}
+
+.confirm-btn.danger:hover {
+  background: var(--copper);
+  color: var(--bg);
+}
+
 /* Transient command feedback (e.g. unknown command). */
 .notice {
   color: var(--text-dim);

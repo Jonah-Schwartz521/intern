@@ -63,6 +63,19 @@ export async function saveSession(session: Session): Promise<void> {
   await s.save();
 }
 
+// Remove a conversation from the store for good. Used by /clear, which wipes a
+// throwaway conversation instead of keeping it in the resume list. Autosave
+// means the conversation is usually already on disk by the time it is cleared,
+// so forgetting the id is not enough; the record has to go.
+export async function deleteSession(id: string): Promise<void> {
+  const s = await store();
+  const all = (await s.get<Record<string, Session>>(SESSIONS_KEY)) ?? {};
+  if (!(id in all)) return;
+  delete all[id];
+  await s.set(SESSIONS_KEY, all);
+  await s.save();
+}
+
 // All saved conversations, most recently updated first.
 export async function listSessions(): Promise<Session[]> {
   const all = await loadSessions();

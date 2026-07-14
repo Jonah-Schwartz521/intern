@@ -31,6 +31,7 @@ import {
   getCurrentId,
   setCurrentId,
   saveSession,
+  deleteSession,
   listSessions,
   sessionTitle,
   formatSessionTime,
@@ -986,6 +987,9 @@ function App() {
   // notice for command feedback (e.g. unknown command). Neither is persisted.
   const [resumeSessions, setResumeSessions] = useState<Session[] | null>(null);
   const [notice, setNotice] = useState("");
+  // /clear is destructive and unrecoverable, so it asks first: this holds the
+  // pending confirmation, shown inline in the stream.
+  const [confirmClear, setConfirmClear] = useState(false);
   // Command palette: highlighted row and whether the user dismissed it (Escape)
   // for the current draft. Which commands show is derived from the registry.
   const [paletteIdx, setPaletteIdx] = useState(0);
@@ -1363,6 +1367,7 @@ function App() {
   // in progress is lost, then clear the view onto a brand new session.
   const startNewConversation = async () => {
     setRowMenuOpen(false);
+    setConfirmClear(false);
     await persistCurrent();
     const id = newSessionId();
     sessionIdRef.current = id;
@@ -1381,6 +1386,7 @@ function App() {
   const openResumeList = async () => {
     setRowMenuOpen(false);
     setNotice("");
+    setConfirmClear(false);
     await persistCurrent();
     const all = await listSessions();
     setResumeSessions(
@@ -1391,6 +1397,7 @@ function App() {
   // Load a saved conversation into the view. Saves the current one first (same
   // reason as new-conversation) before switching.
   const loadConversation = async (sess: Session) => {
+    setConfirmClear(false);
     await persistCurrent();
     sessionIdRef.current = sess.id;
     createdAtRef.current = sess.createdAt;
@@ -1402,11 +1409,43 @@ function App() {
     setNotice("");
   };
 
+  // Ask before wiping. Unlike /new, a clear does not save the conversation, so
+  // there is no undo and no /resume entry to go back to.
+  const requestClear = () => {
+    setRowMenuOpen(false);
+    setResumeSessions(null);
+    setNotice("");
+    if (messages.length === 0) {
+      setNotice("Nothing to clear, this conversation is already empty.");
+      return;
+    }
+    setConfirmClear(true);
+  };
+
+  // Confirmed clear. Autosave has almost certainly already written this
+  // conversation to the store, so the record is deleted, not just abandoned,
+  // then the view moves onto a brand new session.
+  const clearConversation = async () => {
+    setConfirmClear(false);
+    const old = sessionIdRef.current;
+    if (old) await deleteSession(old);
+    const id = newSessionId();
+    sessionIdRef.current = id;
+    createdAtRef.current = Date.now();
+    titleRef.current = undefined;
+    lastSavedRef.current = "";
+    await setCurrentId(id);
+    setMessages([]);
+    setInput("");
+    setNotice("Conversation cleared. It was not saved.");
+  };
+
   // Slash-command registry. Extensible: add a name here and it works from the
-  // input box, no other wiring needed.
+  // input box and shows up in the palette, no other wiring needed.
   const commands: Record<string, { description: string; run: () => void | Promise<void> }> = {
     resume: { description: "Browse and reopen past conversations", run: openResumeList },
-    new: { description: "Start a new conversation", run: startNewConversation },
+    new: { description: "Start a new conversation, saving this one", run: startNewConversation },
+    clear: { description: "Wipe this conversation without saving it", run: requestClear },
   };
 
   const runCommand = async (raw: string) => {
@@ -1414,7 +1453,9 @@ function App() {
     const cmd = commands[name];
     if (!cmd) {
       setResumeSessions(null);
-      setNotice(`Unknown command: /${name}. Try /resume or /new.`);
+      setConfirmClear(false);
+      const known = Object.keys(commands).map((c) => `/${c}`).join(", ");
+      setNotice(`Unknown command: /${name}. Try ${known}.`);
       return;
     }
     await cmd.run();
@@ -1453,6 +1494,8 @@ function App() {
 
     setResumeSessions(null);
     setNotice("");
+    // Sending a message answers the pending question: they did not mean to clear.
+    setConfirmClear(false);
     const newHistory: Message[] = [...messages, { role: "user", text }];
     setMessages(newHistory);
     setInput("");
@@ -1554,6 +1597,21 @@ function App() {
                 </button>
               ))
             )}
+          </div>
+        )}
+        {confirmClear && (
+          <div className="confirm-bar">
+            <span className="confirm-text">
+              Clear this conversation? It will not be saved, and you cannot get it back.
+            </span>
+            <div className="confirm-actions">
+              <button className="confirm-btn danger" onClick={clearConversation}>
+                Clear
+              </button>
+              <button className="confirm-btn" onClick={() => setConfirmClear(false)}>
+                Cancel
+              </button>
+            </div>
           </div>
         )}
         {notice && <div className="notice">{notice}</div>}
