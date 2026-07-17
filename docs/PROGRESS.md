@@ -50,6 +50,11 @@ Living log of what is built and what is next. Update at the end of every session
 
 - [x] **Predictable window placement on hotkey.** `src/summon.ts` positions the window before showing it: horizontally centered, top edge 22% down the work area (upper third, not dead center), on the monitor under the mouse cursor (`cursorPosition` + `monitorFromPoint`, falling back to current then primary monitor). Uses `workArea` so it clears the taskbar, and clamps so it never hangs off the bottom. The input is focused on summon, so the user can type immediately. Pure JS window API, no Rust; needed one new capability, `core:window:allow-set-position`.
 
+## Done: chat stream follows new content
+
+- [x] **Auto-scroll, split by who caused the content.** User-initiated actions (send a message, run a command, switch conversations) always jump to the bottom: you acted, so you see the result. Passive arrivals (the reply, a background result, the thinking line) only follow if you are already within 64px of the bottom, so scrolling up to read while a reply is in flight does not get yanked. Exception: the `/clear` confirm always scrolls into view, since it asks a question.
+- [x] **Jump to latest.** A small circular copper-on-hover button floats above the input row, on the right, only while the user is scrolled up. Click scrolls smoothly to the bottom. Hidden while the command palette is open (same corner).
+
 ## Next Up
 
 1. **End-to-end test of the full flow** (exercise every tool in one session).

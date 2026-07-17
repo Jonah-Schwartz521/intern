@@ -102,6 +102,34 @@ body {
   gap: 8px;
 }
 
+/* Jump to latest: floats just above the input row, centered. Only shown while
+   the user is scrolled up, so it reads as a control, not chrome. */
+.jump-btn {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  /* The centering offset lives in transform, so the hover nudge has to keep it. */
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
+}
+
+.jump-btn:hover {
+  color: var(--copper);
+  border-color: var(--copper-dim);
+  transform: translate(-50%, 1px);
+}
+
 /* Command palette: inline dropdown above the input, driven by the / registry. */
 .cmd-palette {
   position: absolute;

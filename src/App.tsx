@@ -49,6 +49,10 @@ const MIN_AUDIO_BYTES = 2048;
 // document does not blow up the token bill.
 const MAX_CLIPBOARD_CHARS = 8000;
 
+// How close to the bottom of the stream still counts as "at the bottom", both
+// for following new content and for hiding the jump button.
+const NEAR_BOTTOM_PX = 64;
+
 const HAIKU = "claude-haiku-4-5-20251001";
 const OPUS = "claude-opus-4-8";
 
@@ -898,6 +902,13 @@ const IconHistory = () => (
     <path d="M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5" />
   </svg>
 );
+const IconArrowDown = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 5l0 14" />
+    <path d="M18 13l-6 6" />
+    <path d="M6 13l6 6" />
+  </svg>
+);
 const IconFile = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M14 3v4a1 1 0 0 0 1 1h4" />
@@ -990,6 +1001,9 @@ function App() {
   // /clear is destructive and unrecoverable, so it asks first: this holds the
   // pending confirmation, shown inline in the stream.
   const [confirmClear, setConfirmClear] = useState(false);
+  // Whether the stream is scrolled to (or near) the bottom. Drives both the
+  // follow-on-new-content behavior and the jump-to-bottom button.
+  const [atBottom, setAtBottom] = useState(true);
   // Command palette: highlighted row and whether the user dismissed it (Escape)
   // for the current draft. Which commands show is derived from the registry.
   const [paletteIdx, setPaletteIdx] = useState(0);
@@ -998,6 +1012,10 @@ function App() {
   const chunksRef = useRef<Blob[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const rowMenuRef = useRef<HTMLDivElement>(null);
+  const historyRef = useRef<HTMLDivElement>(null);
+  // Same value as `atBottom`, readable from effects without making them depend
+  // on it (a dependency would re-fire the follow when the flag flips).
+  const atBottomRef = useRef(true);
   // Persistence: the current conversation's id and creation time. loadedRef gates
   // saving until the initial restore is done, so we never clobber saved history
   // with the empty starting state.
@@ -1108,6 +1126,57 @@ function App() {
       }
     })();
   }, [messages]);
+
+  // Jump the stream to the bottom. Instant by default (following new content
+  // should feel like the content just landed there, not like an animation);
+  // smooth when the user asks for it via the button.
+  const scrollToBottom = (smooth = false) => {
+    const el = historyRef.current;
+    if (!el) return;
+    atBottomRef.current = true;
+    setAtBottom(true);
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+  };
+
+  // Re-arm the follow, so whatever this action appends pulls the view down with
+  // it. Call this for anything the USER just did (sending a message, running a
+  // command, switching conversations): they acted, so they want to see the
+  // result, wherever they had scrolled to. The actual scroll happens in the
+  // follow effect once the new content is in the DOM.
+  const stickToBottom = () => {
+    atBottomRef.current = true;
+    setAtBottom(true);
+  };
+
+  // Track how close to the bottom the user is. Near enough counts as at the
+  // bottom, so a stray pixel or a partially-scrolled last line does not read as
+  // "the user scrolled up to read something".
+  const onHistoryScroll = () => {
+    const el = historyRef.current;
+    if (!el) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const near = distance <= NEAR_BOTTOM_PX;
+    atBottomRef.current = near;
+    setAtBottom(near);
+  };
+
+  // Follow new content, if the follow is armed. Two ways it gets armed: the user
+  // is already near the bottom (passive arrivals, like a reply or a background
+  // result, keep up with them), or they just did something (stickToBottom), in
+  // which case they see the result no matter where they had scrolled to. What
+  // this deliberately does NOT do is yank a user who scrolled up to read while a
+  // reply was in flight. Runs after the DOM is updated and before paint, so
+  // scrollHeight already includes the new content.
+  useEffect(() => {
+    const el = historyRef.current;
+    if (el && atBottomRef.current) el.scrollTop = el.scrollHeight;
+  }, [messages, thinking, status, resumeSessions, notice]);
+
+  // Exception: the /clear confirmation asks a question, so it always scrolls
+  // into view, wherever the user happens to be.
+  useEffect(() => {
+    if (confirmClear) scrollToBottom(true);
+  }, [confirmClear]);
 
   // Close the overflow menu when clicking outside it.
   useEffect(() => {
@@ -1368,6 +1437,7 @@ function App() {
   const startNewConversation = async () => {
     setRowMenuOpen(false);
     setConfirmClear(false);
+    stickToBottom();
     await persistCurrent();
     const id = newSessionId();
     sessionIdRef.current = id;
@@ -1387,6 +1457,7 @@ function App() {
     setRowMenuOpen(false);
     setNotice("");
     setConfirmClear(false);
+    stickToBottom();
     await persistCurrent();
     const all = await listSessions();
     setResumeSessions(
@@ -1398,6 +1469,9 @@ function App() {
   // reason as new-conversation) before switching.
   const loadConversation = async (sess: Session) => {
     setConfirmClear(false);
+    // A conversation switch always lands on the newest message, even if the user
+    // was scrolled up in the outgoing one.
+    stickToBottom();
     await persistCurrent();
     sessionIdRef.current = sess.id;
     createdAtRef.current = sess.createdAt;
@@ -1427,6 +1501,7 @@ function App() {
   // then the view moves onto a brand new session.
   const clearConversation = async () => {
     setConfirmClear(false);
+    stickToBottom();
     const old = sessionIdRef.current;
     if (old) await deleteSession(old);
     const id = newSessionId();
@@ -1485,6 +1560,12 @@ function App() {
     const text = input.trim();
     if (text === "") return;
 
+    // The user just acted, so the result of that action must be visible: send and
+    // run-a-command both jump to the bottom no matter where they had scrolled to.
+    // (The reply that lands later is a passive arrival and respects wherever they
+    // are by then.)
+    stickToBottom();
+
     // Slash commands are handled locally and never sent to Claude.
     if (text.startsWith("/")) {
       setInput("");
@@ -1532,7 +1613,7 @@ function App() {
           </button>
         </div>
       </header>
-      <div className="history">
+      <div className="history" ref={historyRef} onScroll={onHistoryScroll}>
         {messages.length === 0 && (
           <div className="empty">Ask Intern to do something.</div>
         )}
@@ -1620,6 +1701,16 @@ function App() {
         )}
       </div>
       <div className="input-area">
+        {!atBottom && !paletteOpen && (
+          <button
+            className="jump-btn"
+            onClick={() => scrollToBottom(true)}
+            title="Jump to latest"
+            aria-label="Jump to latest"
+          >
+            <IconArrowDown />
+          </button>
+        )}
         {paletteOpen && (
           <div className="cmd-palette" role="listbox">
             {paletteItems.map((c, i) => (
