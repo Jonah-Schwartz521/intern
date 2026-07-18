@@ -15,7 +15,12 @@
         "title": "Splerm",
         "width": 480,
         "height": 640,
-        "decorations": false
+        "decorations": false,
+        "transparent": true,
+        "skipTaskbar": true,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "visible": false
       }
     ],
     "security": {

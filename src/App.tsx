@@ -21,7 +21,16 @@ import { listEvents, createEvent, deleteEvent, updateEvent } from "./calendar";
 import { transcribe } from "./transcribe";
 import { createDraft } from "./mail";
 import { writeTempAudio, removeTempAudio } from "./voice";
-import { summonWindow } from "./summon";
+import {
+  DEFAULT_DOCK_EDGE,
+  DOCK_ANIM_MS,
+  dockWindow,
+  isModalOpen,
+  duringModal,
+  loadDockEdge,
+  setDockEdge,
+  type DockEdge,
+} from "./dock";
 import { isSupportedLang, highlightCode } from "./highlight";
 import {
   assembleContextForRequest,
@@ -559,7 +568,7 @@ async function runTool(name: string, input: any): Promise<string> {
     try {
       let path: string | undefined = input.path;
       if (!path) {
-        const picked = await open({
+        const picked = await duringModal(() => open({
           multiple: false,
           directory: false,
           title: "Choose audio or video to transcribe",
@@ -572,7 +581,7 @@ async function runTool(name: string, input: any): Promise<string> {
               ],
             },
           ],
-        });
+        }));
         if (!picked || Array.isArray(picked)) return "No file was selected.";
         path = picked;
       }
@@ -817,7 +826,7 @@ function OutlookStatus() {
   const connect = async () => {
     setState("connecting");
     try {
-      await login();
+      await duringModal(() => login());
       await syncState();
     } catch (e) {
       console.error("Outlook connect failed:", e);
@@ -970,6 +979,12 @@ const IconSettings = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z" />
     <path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" />
+  </svg>
+);
+const IconLayout = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M4 4m0 2a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z" />
+    <path d="M15 4v16" />
   </svg>
 );
 // Inline email compose card. Prefilled from Claude's draft; the user edits the
@@ -1204,6 +1219,17 @@ function App() {
   const [contextFiles, setContextFiles] = useState<ContextFile[]>([]);
   const [contextBusy, setContextBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  // Docked-panel summon state. `shown` drives the slide-in/out (a CSS class on
+  // the container); visibleRef tracks whether the window is up, readable from the
+  // hotkey/blur/Esc handlers without stale closures.
+  const [shown, setShown] = useState(false);
+  const visibleRef = useRef(false);
+  // Which edge the panel docks to (user setting, persisted). Drives the window
+  // geometry (via dock.ts) and the CSS orientation (via the data-dock attribute).
+  const [dockEdge, setDock] = useState<DockEdge>(DEFAULT_DOCK_EDGE);
+  // Read by the global Esc handler so it can defer to the command palette's own
+  // Esc (which closes the palette) instead of dismissing the whole panel.
+  const paletteOpenRef = useRef(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -1396,18 +1422,72 @@ function App() {
     requestAnimationFrame(() => inputRef.current?.focus());
   };
 
+  // Restore the persisted dock edge on launch (fresh install falls back to the
+  // default, right). Runs before the first summon since the window starts hidden.
+  useEffect(() => {
+    loadDockEdge().then(setDock).catch((e) => console.error("dock load failed:", e));
+  }, []);
+
+  // Tell the CSS which edge we dock to; it picks the round-inner-corners side and
+  // the slide direction off this. Re-runs when the setting changes.
+  useEffect(() => {
+    document.documentElement.dataset.dock = dockEdge;
+  }, [dockEdge]);
+
+  // Change the dock setting from the menu: persist it, update the CSS orientation
+  // (via state -> data-dock), and, if the panel is currently up, re-dock to the
+  // new edge right away so the change is visible without a hide/show.
+  const changeDock = async (edge: DockEdge) => {
+    setRowMenuOpen(false);
+    setDock(edge);
+    await setDockEdge(edge);
+    if (visibleRef.current) {
+      try {
+        await dockWindow();
+      } catch (e) {
+        console.error("re-dock failed:", e);
+      }
+    }
+  };
+
+  // Summon: re-dock to the cursor's monitor (size/position recomputed every time),
+  // show + focus, then slide the content in on the next frame, after show() has
+  // painted it at its off-edge start so the transition actually runs.
+  const showPanel = async () => {
+    const win = getCurrentWindow();
+    try {
+      await dockWindow();
+    } catch (e) {
+      console.error("docking failed:", e);
+    }
+    await win.show();
+    await win.setFocus();
+    visibleRef.current = true;
+    requestAnimationFrame(() => setShown(true));
+    focusInput();
+  };
+
+  // Dismiss: slide the content out, then actually hide the window once the
+  // animation has finished (DOCK_ANIM_MS matches the CSS transition).
+  const hidePanel = () => {
+    if (!visibleRef.current) return;
+    visibleRef.current = false;
+    setShown(false);
+    window.setTimeout(() => {
+      getCurrentWindow().hide().catch((e) => console.error("hide failed:", e));
+    }, DOCK_ANIM_MS);
+  };
+
+  const togglePanel = async () => {
+    if (visibleRef.current) hidePanel();
+    else await showPanel();
+  };
+
   useEffect(() => {
     const setup = async () => {
       await register(HOTKEY, async (event: ShortcutEvent) => {
         if (event.state !== "Pressed") return;
-        const appWindow = getCurrentWindow();
-        const visible = await appWindow.isVisible();
-        if (visible) {
-          await appWindow.hide();
-        } else {
-          await summonWindow();
-          focusInput();
-        }
+        await togglePanel();
       });
 
       // Enable launch-at-startup once (no-op if already enabled).
@@ -1425,6 +1505,36 @@ function App() {
     };
   }, []);
 
+  // Summon/dismiss behavior: hide on blur and on Esc, so the panel acts like an
+  // overlay you summon and dismiss, not a window you manage.
+  useEffect(() => {
+    const win = getCurrentWindow();
+    let unlisten: (() => void) | undefined;
+    win
+      .onFocusChanged(({ payload: focused }) => {
+        // Losing focus dismisses the panel, EXCEPT while one of our own native
+        // dialogs (file picker, Outlook OAuth) is open: those steal focus without
+        // the user actually leaving Splerm, so hiding then would be wrong.
+        if (!focused && visibleRef.current && !isModalOpen()) hidePanel();
+      })
+      .then((u) => {
+        unlisten = u;
+      });
+
+    const onKey = (e: KeyboardEvent) => {
+      // Esc dismisses the panel, unless the command palette is open (its own Esc
+      // handler closes the palette first).
+      if (e.key === "Escape" && visibleRef.current && !paletteOpenRef.current) {
+        hidePanel();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      unlisten?.();
+      window.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
   const handleCopy = async (text: string, idx: number) => {
     if (await copyToClipboard(text)) {
       setCopiedIdx(idx);
@@ -1436,7 +1546,7 @@ function App() {
   // whisper path as the transcribe_file tool; content goes to a transcript bubble.
   const transcribeFileFromMenu = async () => {
     setRowMenuOpen(false);
-    const picked = await open({
+    const picked = await duringModal(() => open({
       multiple: false,
       directory: false,
       title: "Choose audio or video to transcribe",
@@ -1449,7 +1559,7 @@ function App() {
           ],
         },
       ],
-    });
+    }));
     if (!picked || Array.isArray(picked)) return;
     const path = picked;
     setThinking(true);
@@ -1629,7 +1739,7 @@ function App() {
   };
 
   const addContextFiles = async () => {
-    await ingestPaths(await pickContextFiles());
+    await ingestPaths(await duringModal(() => pickContextFiles()));
   };
 
   const removeContextFile = async (id: string) => {
@@ -1820,6 +1930,8 @@ function App() {
     : [];
   const paletteOpen = isCommandDraft && !paletteDismissed && paletteItems.length > 0;
   const paletteActiveIdx = Math.min(paletteIdx, paletteItems.length - 1);
+  // Mirror palette state into a ref so the global Esc handler can read it.
+  paletteOpenRef.current = paletteOpen;
 
   const send = async () => {
     const text = input.trim();
@@ -1867,7 +1979,7 @@ function App() {
   };
 
   return (
-    <main className="container">
+    <main className={`container${shown ? " shown" : ""}`}>
       <header className="titlebar" data-tauri-drag-region>
         <span className="brand">Splerm</span>
         <div className="window-controls">
@@ -2057,6 +2169,24 @@ function App() {
               <button className="row-menu-item" onClick={transcribeFileFromMenu}>
                 <IconFile /> Transcribe file
               </button>
+              <div className="row-menu-sep" />
+              <div className="row-menu-label">
+                <IconLayout /> Dock
+              </div>
+              <div className="dock-seg" role="radiogroup" aria-label="Dock position">
+                {(["right", "left", "top", "bottom"] as DockEdge[]).map((edge) => (
+                  <button
+                    key={edge}
+                    className={`dock-seg-btn${dockEdge === edge ? " active" : ""}`}
+                    role="radio"
+                    aria-checked={dockEdge === edge}
+                    onClick={() => changeDock(edge)}
+                  >
+                    {edge[0].toUpperCase() + edge.slice(1)}
+                  </button>
+                ))}
+              </div>
+              <div className="row-menu-sep" />
               <button className="row-menu-item" onClick={openSettings}>
                 <IconSettings /> Settings
               </button>

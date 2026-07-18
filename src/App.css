@@ -20,8 +20,11 @@ html, body, #root {
   height: 100%;
 }
 
+/* The window is transparent (docked panel): the page background must be see
+   through so the rounded inner corners reveal the desktop behind them. The panel
+   surface color lives on .container instead. */
 body {
-  background: var(--bg);
+  background: transparent;
   color: var(--text);
   font-family: var(--mono);
   font-size: 14px;
@@ -32,6 +35,51 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  background: var(--bg);
+  /* Clip the panel content to the rounded inner corners below. */
+  overflow: hidden;
+  /* Slide the whole panel in from / out to the docked edge. Transform only, so
+     it never touches layout. Duration matches DOCK_ANIM_MS in dock.ts. The
+     per-edge start offset and corner rounding are set by the [data-dock] rules. */
+  transition: transform 180ms ease-out;
+}
+
+/* Docked-edge styling. The edge touching the screen border stays square; only
+   the two inner corners round, so the panel reads as docked to that edge. Each
+   edge also gets its off-screen start transform (the resting, hidden position);
+   .shown slides it back to zero. */
+:root[data-dock="right"] .container {
+  border-radius: 10px 0 0 10px;
+  transform: translateX(100%);
+}
+:root[data-dock="left"] .container {
+  border-radius: 0 10px 10px 0;
+  transform: translateX(-100%);
+}
+:root[data-dock="top"] .container {
+  border-radius: 0 0 10px 10px;
+  transform: translateY(-100%);
+}
+:root[data-dock="bottom"] .container {
+  border-radius: 10px 10px 0 0;
+  transform: translateY(100%);
+}
+:root[data-dock] .container.shown {
+  transform: translate(0, 0);
+}
+
+/* Horizontal docks (top/bottom) are short and wide. Two guards so the chat still
+   works in that shape without disturbing the vertical docks:
+   - min-height:0 lets .history actually shrink and scroll inside a short window
+     (a flex child defaults to min-height:auto, which would overflow and push the
+     input off-screen). Harmless in the tall vertical docks.
+   - cap the message width so bubbles do not stretch to a very wide line length. */
+.history {
+  min-height: 0;
+}
+:root[data-dock="top"] .message,
+:root[data-dock="bottom"] .message {
+  max-width: 680px;
 }
 
 .topbar {
@@ -297,6 +345,53 @@ body {
 .row-menu-item:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* Dock picker inside the ... menu: a thin divider, a dim label, and a 4-up
+   segmented control. Active segment reads via copper text + border (no fill), so
+   this adds no background-color to an interactive element. */
+.row-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
+.row-menu-label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 10px 4px;
+  color: var(--text-dim);
+  font-family: var(--sans);
+  font-size: 12px;
+}
+
+.dock-seg {
+  display: flex;
+  gap: 4px;
+  padding: 2px 6px 4px;
+}
+
+.dock-seg-btn {
+  flex: 1 1 0;
+  padding: 6px 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--sans);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.dock-seg-btn:hover {
+  color: var(--text);
+  border-color: var(--copper-dim);
+}
+
+.dock-seg-btn.active {
+  color: var(--copper);
+  border-color: var(--copper);
 }
 
 .mic-btn.recording {
