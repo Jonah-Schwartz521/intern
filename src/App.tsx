@@ -22,6 +22,15 @@ import { transcribe } from "./transcribe";
 import { createDraft } from "./mail";
 import { writeTempAudio, removeTempAudio } from "./voice";
 import { summonWindow } from "./summon";
+import {
+  assembleContextForRequest,
+  addFiles,
+  removeFile,
+  listFiles,
+  pickContextFiles,
+  DEFAULT_CONTEXT_TOKEN_BUDGET,
+  type ContextFile,
+} from "./contextBin";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import {
   type Message,
@@ -284,6 +293,9 @@ const TOOLS = [
 // push a message. Registered by the App component on mount.
 let uiStatus: ((s: string) => void) | null = null;
 let uiPush: ((m: Message) => void) | null = null;
+// Transient warning sink (context-bin over budget, etc.). Registered by the App
+// component; routed to the same inline notice bar used for command notices.
+let uiWarn: ((s: string) => void) | null = null;
 
 // Copy text to the clipboard; falls back to a hidden textarea when the async
 // Clipboard API is unavailable. Returns whether it succeeded.
@@ -598,6 +610,23 @@ async function runTool(name: string, input: any): Promise<string> {
   return `Unknown tool: ${name}`;
 }
 
+// Final request layout, and where the cache boundaries fall. The Anthropic API
+// builds its cache prefix in a FIXED order regardless of how we order our code:
+// tools -> system -> messages. So the cached prefix is:
+//
+//   [ tools: TOOLS ]                          <- static tool defs
+//   [ system[0]: SYSTEM_PROMPT ]  cache_control  <- breakpoint A: caches tools + base instructions
+//   [ system[1]: <context_file> block ]  cache_control  <- breakpoint B: caches tools + base + context bin
+//   ----------------------------- cache boundary -----------------------------
+//   [ messages: conversation ]                <- per-call, NEVER cached
+//
+// Two breakpoints on purpose: A keeps tools + base instructions cached even when
+// the bin changes (they never change), and B extends the cache through the
+// context block. Adding/removing a bin file only invalidates from B onward, so
+// the base prefix keeps hitting. On repeat calls the whole static prefix bills at
+// the cache-read rate. The user's per-call message sits in `messages`, outside
+// every breakpoint, so it is never cached. When the bin is empty there is no
+// system[1] and the shape is identical to before this feature (single breakpoint).
 async function askClaude(history: Message[]): Promise<string> {
   const apiMessages: any[] = history.map((m) => ({
     role: m.role === "intern" ? "assistant" : "user",
@@ -605,7 +634,35 @@ async function askClaude(history: Message[]): Promise<string> {
   }));
 
   const lastUser = [...history].reverse().find((m) => m.role === "user");
+  // Model routing is unchanged: the context bin applies to whichever model
+  // pickModel lands on (Haiku or Opus), since it is part of the shared system.
   const model = pickModel(lastUser ? lastUser.text : "");
+
+  // Assemble the context bin once per turn (it does not change across tool-use
+  // iterations). Over budget we do NOT silently send: warn the user and log the
+  // overage, then send anyway.
+  const context = await assembleContextForRequest();
+  if (context.overage) {
+    const msg =
+      `Context bin is ${context.overage.totalTokens.toLocaleString()} tokens, ` +
+      `over the ${context.overage.budget.toLocaleString()} budget. Sending anyway; ` +
+      `remove files to cut cost.`;
+    console.warn(`[context-bin] ${msg}`);
+    uiWarn?.(msg);
+  }
+
+  // Static, cached system segments in order: base instructions, then the context
+  // block (only when the bin is non-empty). Both carry a cache_control breakpoint.
+  const system: any[] = [
+    { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+  ];
+  if (context.block) {
+    system.push({
+      type: "text",
+      text: context.block,
+      cache_control: { type: "ephemeral" },
+    });
+  }
 
   while (true) {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -622,13 +679,7 @@ async function askClaude(history: Message[]): Promise<string> {
         // was low enough to cut a mid-size JSON blob off. Output bills per token
         // actually generated, so a higher cap costs nothing on short answers.
         max_tokens: 2048,
-        system: [
-          {
-            type: "text",
-            text: SYSTEM_PROMPT,
-            cache_control: { type: "ephemeral" },
-          },
-        ],
+        system,
         tools: TOOLS,
         messages: apiMessages,
       }),
@@ -917,6 +968,17 @@ const IconFile = () => (
     <path d="M9 17l6 0" />
   </svg>
 );
+const IconChevron = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M6 9l6 6l6 -6" />
+  </svg>
+);
+const IconX = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M18 6l-12 12" />
+    <path d="M6 6l12 12" />
+  </svg>
+);
 const IconSettings = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z" />
@@ -986,6 +1048,94 @@ function ComposeCard({
   );
 }
 
+// Collapsible Context panel: the reference files fed to the model as steering
+// context. Lives below the titlebar as part of the one window (not a modal / not
+// a separate view). Filenames + token counts render monospace; labels sans.
+function ContextPanel({
+  open,
+  onToggle,
+  files,
+  busy,
+  dragOver,
+  onAdd,
+  onRemove,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  files: ContextFile[];
+  busy: boolean;
+  dragOver: boolean;
+  onAdd: () => void;
+  onRemove: (id: string) => void;
+}) {
+  const total = files.reduce((sum, f) => sum + f.tokenCount, 0);
+  const budget = DEFAULT_CONTEXT_TOKEN_BUDGET;
+  // Color the running total only once it matters: amber approaching the budget,
+  // red once over it. Neutral (dim) while there is plenty of headroom.
+  const tokenState = total > budget ? "over" : total >= budget * 0.8 ? "warn" : "ok";
+
+  return (
+    <section className={`context-panel${dragOver ? " drag-over" : ""}`}>
+      <button
+        className="ctx-head"
+        onClick={onToggle}
+        aria-expanded={open}
+        title={`Context bin: ${total.toLocaleString()} / ${budget.toLocaleString()} token budget`}
+      >
+        <span className="ctx-head-left">
+          <span className={`ctx-chevron${open ? " open" : ""}`}>
+            <IconChevron />
+          </span>
+          <span className="ctx-title">Context</span>
+        </span>
+        <span className={`ctx-summary ctx-tokens-${tokenState}`}>
+          {files.length === 0
+            ? "empty"
+            : `${files.length} file${files.length === 1 ? "" : "s"} · ${total.toLocaleString()} tokens`}
+        </span>
+      </button>
+      {open && (
+        <div className="ctx-body">
+          <div className={`ctx-dropzone${dragOver ? " over" : ""}`}>
+            <span className="ctx-drop-hint">Drop files here</span>
+            <button className="ctx-add-btn" onClick={onAdd} disabled={busy}>
+              <IconPlus /> Add files
+            </button>
+          </div>
+          {files.length === 0 ? (
+            <p className="ctx-empty">
+              Add reference files (.txt, .md, .pdf, .docx) and Splerm steers its
+              answers with your own material on every request.
+            </p>
+          ) : (
+            <ul className="ctx-list">
+              {files.map((f) => (
+                <li key={f.id} className="ctx-file">
+                  <span className="ctx-file-name" title={f.path}>
+                    {f.filename}
+                  </span>
+                  <span className="ctx-file-tokens">
+                    {f.tokenCount.toLocaleString()} tok
+                  </span>
+                  <button
+                    className="ctx-remove"
+                    onClick={() => onRemove(f.id)}
+                    title="Remove"
+                    aria-label={`Remove ${f.filename}`}
+                  >
+                    <IconX />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {busy && <div className="ctx-busy">Reading files...</div>}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -1008,6 +1158,13 @@ function App() {
   // for the current draft. Which commands show is derived from the registry.
   const [paletteIdx, setPaletteIdx] = useState(0);
   const [paletteDismissed, setPaletteDismissed] = useState(false);
+  // Context bin: the collapsible panel's open state, the ingested files (source
+  // of truth on disk, mirrored here for the list), a busy flag during ingestion,
+  // and whether a file drag is currently hovering the window.
+  const [contextOpen, setContextOpen] = useState(false);
+  const [contextFiles, setContextFiles] = useState<ContextFile[]>([]);
+  const [contextBusy, setContextBusy] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -1038,9 +1195,11 @@ function App() {
   useEffect(() => {
     uiStatus = setStatus;
     uiPush = (m) => setMessages((prev) => [...prev, m]);
+    uiWarn = setNotice;
     return () => {
       uiStatus = null;
       uiPush = null;
+      uiWarn = null;
     };
   }, []);
 
@@ -1399,6 +1558,73 @@ function App() {
     else startRecording("mic");
   };
 
+  // Reload the context bin from disk into the list. Cheap (a single store read),
+  // called after every add/remove so the panel stays in sync with the source.
+  const refreshContext = async () => {
+    setContextFiles(await listFiles());
+  };
+
+  // Ingest a set of paths (from the picker or a drop) through the prompt-1
+  // ingestion module. Unsupported/empty files come back as skips, which we
+  // surface in the inline notice bar rather than failing silently.
+  const ingestPaths = async (paths: string[]) => {
+    if (paths.length === 0) return;
+    setContextOpen(true);
+    setContextBusy(true);
+    try {
+      const { skipped } = await addFiles(paths);
+      await refreshContext();
+      if (skipped.length > 0) {
+        const detail = skipped
+          .map((s) => `${s.path.split(/[\\/]/).pop()} (${s.reason})`)
+          .join("; ");
+        setNotice(`Skipped ${skipped.length}: ${detail}`);
+      } else {
+        setNotice("");
+      }
+    } catch (e) {
+      setNotice(`Could not add files: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setContextBusy(false);
+    }
+  };
+
+  const addContextFiles = async () => {
+    await ingestPaths(await pickContextFiles());
+  };
+
+  const removeContextFile = async (id: string) => {
+    await removeFile(id);
+    await refreshContext();
+  };
+
+  // Load the bin on launch, and wire native OS file drops (Tauri gives real
+  // filesystem paths here, which DOM drop events do not). A drag over the window
+  // opens the panel so the drop target is visible; the drop ingests the paths.
+  useEffect(() => {
+    void refreshContext();
+    let unlisten: (() => void) | undefined;
+    getCurrentWindow()
+      .onDragDropEvent((event) => {
+        const p = event.payload;
+        if (p.type === "enter" || p.type === "over") {
+          setContextOpen(true);
+          setDragOver(true);
+        } else if (p.type === "drop") {
+          setDragOver(false);
+          void ingestPaths(p.paths);
+        } else {
+          setDragOver(false);
+        }
+      })
+      .then((u) => {
+        unlisten = u;
+      });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
   const openSettings = () => {
     setRowMenuOpen(false);
     setMessages((prev) => [
@@ -1613,6 +1839,15 @@ function App() {
           </button>
         </div>
       </header>
+      <ContextPanel
+        open={contextOpen}
+        onToggle={() => setContextOpen((o) => !o)}
+        files={contextFiles}
+        busy={contextBusy}
+        dragOver={dragOver}
+        onAdd={addContextFiles}
+        onRemove={removeContextFile}
+      />
       <div className="history" ref={historyRef} onScroll={onHistoryScroll}>
         {messages.length === 0 && (
           <div className="empty">Ask Splerm to do something.</div>

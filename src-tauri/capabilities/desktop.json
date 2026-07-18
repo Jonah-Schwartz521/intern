@@ -24,6 +24,11 @@
     "dialog:allow-open",
     "clipboard-manager:allow-read-text",
     {
+      "comment": "Read any file the user picks for the context bin. A reference file can live anywhere the user browses (Documents, but also project dirs like C:\\dev), so read is broad by necessity; narrow it to e.g. $HOME/** if you only ever add files from home. Read only, no write.",
+      "identifier": "fs:allow-read-file",
+      "allow": [{ "path": "**" }]
+    },
+    {
       "identifier": "fs:allow-write-file",
       "allow": [{ "path": "$TEMP/intern-voice-input.*" }]
     },

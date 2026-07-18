@@ -7,6 +7,7 @@
   --text-dim: #8a8178;
   --border: #2a2420;
   --mono: "Cascadia Code", "Consolas", "SF Mono", ui-monospace, monospace;
+  --sans: "Segoe UI", system-ui, -apple-system, sans-serif;
 }
 
 * {
@@ -799,4 +800,194 @@ body {
   color: var(--text-dim);
   font-size: 13px;
   font-style: italic;
+}
+
+/* Context bin: collapsible panel below the titlebar for the reference files fed
+   to the model as steering context. Part of the one window, not a separate view.
+   Labels are sans (UI text); filenames, paths, and token counts are mono. */
+.context-panel {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+
+.ctx-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 16px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.ctx-head-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ctx-title {
+  font-family: var(--sans);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.ctx-chevron {
+  display: flex;
+  color: var(--text-dim);
+  transition: transform 0.15s ease;
+}
+
+.ctx-chevron.open {
+  transform: rotate(180deg);
+}
+
+/* Running total for the whole bin. Neutral with headroom, amber near the budget,
+   red once over it (the guard still sends, this is the visual warning). */
+.ctx-summary {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.ctx-tokens-warn {
+  color: var(--copper);
+}
+
+.ctx-tokens-over {
+  color: #d9776b;
+}
+
+.ctx-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 16px 12px;
+}
+
+.ctx-dropzone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+/* Highlighted while a file drag hovers the window (dragOver) or the zone. */
+.context-panel.drag-over .ctx-dropzone,
+.ctx-dropzone.over {
+  border-color: var(--copper);
+  background: rgba(192, 120, 64, 0.08);
+}
+
+.ctx-drop-hint {
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.ctx-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--copper);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--copper);
+  font-family: var(--sans);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ctx-add-btn:hover:not(:disabled) {
+  background: var(--copper);
+  color: var(--bg);
+}
+
+.ctx-add-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ctx-empty {
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+/* Capped so a large bin scrolls inside the panel instead of pushing the input
+   row off-screen. (overflow-y is deliberate here, on a new isolated element.) */
+.ctx-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 168px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.ctx-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.ctx-file:hover {
+  background: var(--bg);
+}
+
+/* Ellipsis-truncate long filenames (same pattern as .oa-email above). */
+.ctx-file-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ctx-file-tokens {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.ctx-remove {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.ctx-remove:hover {
+  color: #d9776b;
+}
+
+.ctx-busy {
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--text-dim);
 }
