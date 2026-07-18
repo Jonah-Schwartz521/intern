@@ -1,10 +1,10 @@
 # CLAUDE.md
 
-Operating manual for Claude Code on the Intern project. Read this at the start of every session.
+Operating manual for Claude Code on the Splerm project. Read this at the start of every session.
 
-## What Intern Is
+## What Splerm Is
 
-A lightweight, hotkey-summoned desktop AI agent. The user hits a shortcut, asks for a quick task (create a meeting, set a reminder, find a file, transcribe a video), and Intern executes it. It is a quick-task tool, not a chat app you sit in. Full detail in docs/NORTH_STAR.md.
+A lightweight, hotkey-summoned desktop AI agent. The user hits a shortcut, asks for a quick task (create a meeting, set a reminder, find a file, transcribe a video), and Splerm executes it. It is a quick-task tool, not a chat app you sit in. Full detail in docs/NORTH_STAR.md.
 
 ## How to Work With Me
 
@@ -49,7 +49,7 @@ This is a Tauri 2.x app, not Electron. The whole reason we chose it is the lean 
 - Keep the model behind a thin abstraction so the chosen model is a config value, not hardcoded at call sites.
 - Cache the static system prompt (instructions + tool definitions). It is identical every call, so it should be cached and read at the discounted cache-read rate rather than reprocessed.
 - Keep system prompts tight and ask for compact structured output (JSON for the parsed intent), with a sane max_tokens cap so output cost stays small.
-- Do not use the Batch API. It is async (up to 24h) and Intern is real-time.
+- Do not use the Batch API. It is async (up to 24h) and Splerm is real-time.
 
 ## Design Language
 

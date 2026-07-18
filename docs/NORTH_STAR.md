@@ -1,4 +1,4 @@
-# Intern — Project Scope
+# Splerm: Project Scope
 
 **Version:** 1.3
 **Date:** July 6, 2026
@@ -7,9 +7,9 @@
 
 ## North Star
 
-Intern is a lightweight, always-accessible AI agent that lives on your desktop. Hit a keyboard shortcut, ask it to do something (create a meeting, set a reminder, find a file, transcribe a video), and it handles it. No friction, no navigation, just intent and execution.
+Splerm is a lightweight, always-accessible AI agent that lives on your desktop. Hit a keyboard shortcut, ask it to do something (create a meeting, set a reminder, find a file, transcribe a video), and it handles it. No friction, no navigation, just intent and execution.
 
-The name says it all: Intern is the junior helper you hand quick tasks to. You summon it, get the thing done, and it gets out of your way. It is not a chat app you open and sit in.
+Splerm is the junior helper you hand quick tasks to. You summon it, get the thing done, and it gets out of your way. It is not a chat app you open and sit in.
 
 ---
 
@@ -28,19 +28,19 @@ Fuzzy search your local filesystem. Open files, show recent files, or retrieve s
 Read your calendar to understand your schedule and offer proactive suggestions ("you have a gap Thursday afternoon if you want to schedule something").
 
 **Voice Input**
-Speak your request via microphone instead of typing. Intern transcribes your speech in real time and passes it to the reasoning layer for intent parsing and execution.
+Speak your request via microphone instead of typing. Splerm transcribes your speech in real time and passes it to the reasoning layer for intent parsing and execution.
 
 **Audio Transcription**
-Upload or select an audio file. Intern transcribes the content and displays it as text you can copy, search, or reference.
+Upload or select an audio file. Splerm transcribes the content and displays it as text you can copy, search, or reference.
 
 **Video Transcription**
-Point Intern at a video file (or play a video and hit a button). It transcribes the spoken content and returns clean copyable text.
+Point Splerm at a video file (or play a video and hit a button). It transcribes the spoken content and returns clean copyable text.
 
 **System Audio Transcription**
 Capture and transcribe what is currently playing (a call, a video, a lecture) via the system loopback rather than the microphone. Record-then-transcribe, so it works even with the system muted or on headphones.
 
 **Email Drafting**
-Draft an email from a natural-language request. Intern generates the recipient, subject, and a full first-pass body, shows an editable compose card, then creates the draft in Outlook for you to review and send. Draft-and-handoff: Intern never sends, you send from Outlook.
+Draft an email from a natural-language request. Splerm generates the recipient, subject, and a full first-pass body, shows an editable compose card, then creates the draft in Outlook for you to review and send. Draft-and-handoff: Splerm never sends, you send from Outlook.
 
 **Intent Parsing**
 Understand what the user actually wants, even when phrased casually or ambiguously. Clarify when needed rather than guessing.
@@ -79,9 +79,9 @@ Understand what the user actually wants, even when phrased casually or ambiguous
 
 ---
 
-## Intern's Role (How the AI Should Behave)
+## Splerm's Role (How the AI Should Behave)
 
-You are Intern, the reasoning engine behind a desktop quick-task assistant. Your job:
+You are Splerm, the reasoning engine behind a desktop quick-task assistant. Your job:
 
 - Parse user intent from casual, natural-language input (typed or spoken)
 - Map intent to specific actions (calendar create, reminder set, file search, transcription)
@@ -96,25 +96,25 @@ You are Intern, the reasoning engine behind a desktop quick-task assistant. Your
 ## Example Interactions
 
 **User (speaking):** "Make a meeting with Muna Monday at 10."
-**Intern:** "I'll create a meeting with Muna for Monday at 10 AM. What's the title and how long should it be?"
+**Splerm:** "I'll create a meeting with Muna for Monday at 10 AM. What's the title and how long should it be?"
 
 **User (uploads video):** "Transcribe this lecture."
-**Intern:** "Transcribing now... done. Here's the transcript, you can copy it or search within it."
+**Splerm:** "Transcribing now... done. Here's the transcript, you can copy it or search within it."
 
 **User (plays a video, hits transcribe):** "Get me the text from this."
-**Intern:** "Pulled the audio and transcribed it. Full text is below, ready to copy."
+**Splerm:** "Pulled the audio and transcribed it. Full text is below, ready to copy."
 
 **User (speaking):** "Remind me about the EditPlanner pipeline in two weeks."
-**Intern:** "Reminder set for July 4 to follow up on EditPlanner pipeline."
+**Splerm:** "Reminder set for July 4 to follow up on EditPlanner pipeline."
 
 **User:** "Find my Medtronic presentation."
-**Intern:** "Found your Medtronic intro slide deck in Documents/Medtronic. Want me to open it?"
+**Splerm:** "Found your Medtronic intro slide deck in Documents/Medtronic. Want me to open it?"
 
 ---
 
 ## Scope Boundaries (NOT MVP)
 
-- Autonomous email sending (Intern drafts and hands off; you send from Outlook)
+- Autonomous email sending (Splerm drafts and hands off; you send from Outlook)
 - Slack or Teams message sending
 - Advanced scheduling (finding mutual availability with others)
 - Autonomous task execution without confirmation

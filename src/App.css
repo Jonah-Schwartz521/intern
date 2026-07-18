@@ -77,7 +77,7 @@ body {
   color: #14110e;
 }
 
-/* Plain Intern prose renders bare (no box) so conversation feels light. Only
+/* Plain Splerm prose renders bare (no box) so conversation feels light. Only
    cards (transcript bubbles, compose card) keep a container via .card. */
 .message.intern {
   align-self: flex-start;

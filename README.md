@@ -1,6 +1,6 @@
-# Intern
+# Splerm
 
-A lightweight, hotkey-summoned desktop AI agent. Hit a shortcut, ask it to do a quick task (create a meeting, set a reminder, find a file, transcribe a video), and it handles it. Intern is the junior helper you hand quick tasks to: you summon it, get the thing done, and it gets out of your way.
+A lightweight, hotkey-summoned desktop AI agent. Hit a shortcut, ask it to do a quick task (create a meeting, set a reminder, find a file, transcribe a video), and it handles it. Splerm is the junior helper you hand quick tasks to: you summon it, get the thing done, and it gets out of your way.
 
 ## Status
 

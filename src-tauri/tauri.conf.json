@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Intern",
+  "productName": "Splerm",
   "version": "0.1.0",
   "identifier": "com.jonah521.tauri-app",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Intern",
+        "title": "Splerm",
         "width": 480,
         "height": 640,
         "decorations": false

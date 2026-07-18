@@ -56,7 +56,7 @@ const NEAR_BOTTOM_PX = 64;
 const HAIKU = "claude-haiku-4-5-20251001";
 const OPUS = "claude-opus-4-8";
 
-const SYSTEM_PROMPT = `You are Intern, the reasoning engine behind a desktop quick-task assistant.
+const SYSTEM_PROMPT = `You are Splerm, the reasoning engine behind a desktop quick-task assistant.
 
 The current date and time is ${new Date().toString()}. Use this to resolve relative times like "tomorrow at 3pm" into exact timestamps.
 
@@ -421,7 +421,7 @@ async function fireNotification(text: string) {
     granted = perm === "granted";
   }
   if (granted) {
-    sendNotification({ title: "Intern reminder", body: text });
+    sendNotification({ title: "Splerm reminder", body: text });
   }
 }
 
@@ -441,7 +441,7 @@ async function runTool(name: string, input: any): Promise<string> {
 
     try {
       await scheduleReminderTask(input.text, due);
-      return `Reminder scheduled: "${input.text}" for ${due.toLocaleString()}. It will fire even if Intern is closed.`;
+      return `Reminder scheduled: "${input.text}" for ${due.toLocaleString()}. It will fire even if Splerm is closed.`;
     } catch (e) {
       return `Could not schedule the reminder: ${e instanceof Error ? e.message : String(e)}`;
     }
@@ -672,7 +672,7 @@ async function askClaude(history: Message[]): Promise<string> {
 async function generateTitle(history: Message[]): Promise<string | null> {
   const transcript = history
     .slice(0, 6)
-    .map((m) => `${m.role === "intern" ? "Intern" : "User"}: ${m.text.slice(0, 300)}`)
+    .map((m) => `${m.role === "intern" ? "Splerm" : "User"}: ${m.text.slice(0, 300)}`)
     .join("\n");
 
   try {
@@ -1602,7 +1602,7 @@ function App() {
   return (
     <main className="container">
       <header className="titlebar" data-tauri-drag-region>
-        <span className="brand">Intern</span>
+        <span className="brand">Splerm</span>
         <div className="window-controls">
           <OutlookStatus />
           <button className="win-btn" onClick={handleMinimize} title="Minimize">
@@ -1615,7 +1615,7 @@ function App() {
       </header>
       <div className="history" ref={historyRef} onScroll={onHistoryScroll}>
         {messages.length === 0 && (
-          <div className="empty">Ask Intern to do something.</div>
+          <div className="empty">Ask Splerm to do something.</div>
         )}
         {messages.map((msg, i) => (
           <div
@@ -1800,7 +1800,7 @@ function App() {
             }
             if (e.key === "Enter") send();
           }}
-          placeholder="Ask Intern..."
+          placeholder="Ask Splerm..."
           autoFocus
         />
         <button
