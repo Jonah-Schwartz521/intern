@@ -991,3 +991,64 @@ body {
   font-size: 12px;
   color: var(--text-dim);
 }
+
+/* Chat code blocks: a header row (language label left, Copy right) over
+   Shiki-highlighted code. Shiki's <pre> carries its own theme background, so we
+   never set a background-color here; the surrounding chrome uses the app tokens.
+   overflow-x on the body is deliberate (long code lines scroll, VS Code style)
+   rather than wrapping. */
+.code-block {
+  margin: 0 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.code-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+  border-radius: 6px 6px 0 0;
+}
+
+/* Language name, top-left: monospace, copper, small and subtle. */
+.code-lang {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--copper);
+}
+
+/* Copy stays pinned right whether or not a language label is present. */
+.code-copy {
+  margin-left: auto;
+}
+
+.code-body {
+  margin: 0;
+}
+
+.code-block pre {
+  margin: 0;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 0 0 6px 6px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.code-block pre code {
+  padding: 0;
+  border: none;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+/* Plain fallback (no language, or a language Shiki has no grammar for): no
+   highlighting, app surface instead of a theme background. */
+.code-plain {
+  background: var(--bg);
+  color: var(--text);
+}

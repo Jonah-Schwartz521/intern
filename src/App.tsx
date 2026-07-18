@@ -22,6 +22,7 @@ import { transcribe } from "./transcribe";
 import { createDraft } from "./mail";
 import { writeTempAudio, removeTempAudio } from "./voice";
 import { summonWindow } from "./summon";
+import { isSupportedLang, highlightCode } from "./highlight";
 import {
   assembleContextForRequest,
   addFiles,
@@ -326,20 +327,6 @@ async function copyToClipboard(text: string): Promise<boolean> {
 // plus surrounding whitespace with a comma.
 function stripEmDashes(text: string): string {
   return text.replace(/\s*[—―]\s*/g, ", ");
-}
-
-// A reply that is essentially one fenced block (reformatted JSON, rewritten
-// text, fixed code) is content the user wants to take somewhere else, so it gets
-// the copyable bubble treatment. A reply that merely mentions a snippet inside a
-// longer explanation is prose, and stays unboxed. Returns the raw block, or
-// undefined when the reply is prose.
-function takeawayContent(reply: string): string | undefined {
-  const fences = [...reply.matchAll(/```[^\n]*\n([\s\S]*?)```/g)];
-  if (fences.length !== 1) return undefined;
-  const body = fences[0][1].trim();
-  if (!body) return undefined;
-  // The block has to carry most of the reply; a short lead-in line is fine.
-  return body.length >= reply.length * 0.6 ? body : undefined;
 }
 
 function pickModel(userText: string): string {
@@ -1136,6 +1123,58 @@ function ContextPanel({
   );
 }
 
+// A fenced code block in the chat: a header row (language label left, Copy
+// right) over Shiki-highlighted code. The language comes from the markdown fence
+// (```ts, ```python). With no language, or one Shiki has no grammar for, it
+// renders as plain text with no highlighting and no label (we do not guess).
+function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
+  const [html, setHtml] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const canHighlight = lang != null && isSupportedLang(lang);
+
+  useEffect(() => {
+    if (!canHighlight) {
+      setHtml(null);
+      return;
+    }
+    // Highlight asynchronously (the grammar may need to load); until it resolves
+    // the plain fallback below shows, so code is readable immediately. `alive`
+    // drops a result that lands after the block changed or unmounted.
+    let alive = true;
+    highlightCode(code, lang!)
+      .then((h) => alive && setHtml(h))
+      .catch(() => alive && setHtml(null));
+    return () => {
+      alive = false;
+    };
+  }, [code, lang, canHighlight]);
+
+  const copy = async () => {
+    if (await copyToClipboard(code)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
+  };
+
+  return (
+    <div className="code-block">
+      <div className="code-head">
+        {lang && <span className="code-lang">{lang}</span>}
+        <button className="copy-btn code-copy" onClick={copy}>
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      {html ? (
+        <div className="code-body" dangerouslySetInnerHTML={{ __html: html }} />
+      ) : (
+        <pre className="code-body code-plain">
+          <code>{code}</code>
+        </pre>
+      )}
+    </div>
+  );
+}
+
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -1812,7 +1851,9 @@ function App() {
       const reply = await askClaude(newHistory);
       setMessages((prev) => [
         ...prev,
-        { role: "intern", text: reply, copyText: takeawayContent(reply) },
+        // Code-heavy replies no longer get a message-level copy bubble; each
+        // fenced block renders its own header with a language label and Copy.
+        { role: "intern", text: reply },
       ]);
     } catch (e) {
       setMessages((prev) => [
@@ -1852,18 +1893,26 @@ function App() {
         {messages.length === 0 && (
           <div className="empty">Ask Splerm to do something.</div>
         )}
-        {messages.map((msg, i) => (
+        {messages.map((msg, i) => {
+          // The message-level copy bubble is for transcripts (plain text). If the
+          // message has any fenced code block, that block renders its own header
+          // Copy, so suppress the message-level one (and its card box) to avoid a
+          // second copy button. Old sessions saved a copyText on code replies, so
+          // this guard also cleans those up on restore.
+          const hasCodeFence = /```/.test(msg.text);
+          const showCopyBubble = msg.copyText != null && !hasCodeFence;
+          return (
           <div
             key={i}
             className={`message ${msg.role}${
-              msg.copyText != null || msg.draft != null ? " card" : ""
+              showCopyBubble || msg.draft != null ? " card" : ""
             }${msg.draft ? " compose" : ""}`}
           >
             {msg.draft ? (
               <ComposeCard initial={msg.draft} onCreate={handleCreateDraft} />
             ) : msg.role === "intern" ? (
               <div className="md">
-                {msg.copyText != null && (
+                {showCopyBubble && (
                   <div className="transcript-head">
                     <button className="copy-btn" onClick={() => handleCopy(msg.copyText!, i)}>
                       {copiedIdx === i ? "Copied" : "Copy"}
@@ -1886,6 +1935,18 @@ function App() {
                         {children}
                       </a>
                     ),
+                    // Fenced code blocks route through CodeBlock. Block code is
+                    // always the single <code> child of a <pre>, so overriding
+                    // pre (not code) cleanly leaves inline `code` untouched. The
+                    // language lives on the child's language-xxx className.
+                    pre: ({ children }) => {
+                      const child: any = Array.isArray(children) ? children[0] : children;
+                      const cls: string = child?.props?.className ?? "";
+                      const m = /language-([^\s]+)/.exec(cls);
+                      const raw = child?.props?.children;
+                      const text = Array.isArray(raw) ? raw.join("") : String(raw ?? "");
+                      return <CodeBlock lang={m ? m[1] : null} code={text.replace(/\n$/, "")} />;
+                    },
                   }}
                 >
                   {msg.text}
@@ -1895,7 +1956,8 @@ function App() {
               msg.text
             )}
           </div>
-        ))}
+          );
+        })}
         {resumeSessions !== null && (
           <div className="resume-list">
             <div className="resume-head">Saved conversations</div>
