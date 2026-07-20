@@ -91,6 +91,24 @@
           "name": "ffmpeg-run-dev-root",
           "cmd": "src-tauri/resources/ffmpeg/ffmpeg.exe",
           "args": true
+        },
+        {
+          "comment": "ImageMagick (magick.exe) as the HEIC/HEIF decode fallback: our ffmpeg build reports heif=false, so HEIC inputs route here instead. args:true because flags are built per output format (quality/resize) in imageConvert.ts; the cmd is fixed to our bundled binary. Wired exactly like ffmpeg-run.",
+          "name": "magick-run",
+          "cmd": "$RESOURCE/resources/imagemagick/magick.exe",
+          "args": true
+        },
+        {
+          "comment": "Dev fallback for magick, same rationale as ffmpeg-run-dev: under `tauri dev` the bundled $RESOURCE copy is often absent, so this points at the in-tree source relative to the working dir (src-tauri under `tauri dev`). Harmless in production. imageConvert.ts probes prod first and only uses this if it works.",
+          "name": "magick-run-dev",
+          "cmd": "resources/imagemagick/magick.exe",
+          "args": true
+        },
+        {
+          "comment": "Second dev fallback for magick, resolved from the repo root, in case `tauri dev` runs with cwd at the project root rather than src-tauri.",
+          "name": "magick-run-dev-root",
+          "cmd": "src-tauri/resources/imagemagick/magick.exe",
+          "args": true
         }
       ]
     },

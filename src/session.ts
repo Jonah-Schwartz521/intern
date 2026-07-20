@@ -13,6 +13,12 @@ export type Message = {
   // When set, the message renders an editable email compose card prefilled with
   // Claude's draft; the user edits and creates the draft from there.
   draft?: { to: string; subject: string; body: string };
+  // When set, the message renders an image-conversion result card: per-file
+  // outcome (output path or error) plus a reveal-in-folder action.
+  conversion?: {
+    format: string;
+    results: { input: string; output?: string; ok: boolean; error?: string }[];
+  };
 };
 
 export type Session = {

@@ -1,11 +1,16 @@
-// Local image format conversion via the bundled full ffmpeg build. Pure JS +
-// the Tauri shell plugin (command `ffmpeg-run`, a resource-dir ffmpeg.exe); no
-// Rust. Scope is deliberately narrow: format conversion (plus optional quality /
-// resize), NOT image editing.
+// Local image format conversion via two bundled binaries, both pure JS + the
+// Tauri shell plugin, no Rust. ffmpeg (command `ffmpeg-run`, a resource-dir
+// ffmpeg.exe) handles the common formats plus svg/avif. Our ffmpeg build reports
+// heif=false and cannot read HEIC, so HEIC/HEIF inputs route to ImageMagick
+// (command `magick-run`, a resource-dir magick.exe) instead. Scope is
+// deliberately narrow: format conversion (plus optional quality / resize), NOT
+// image editing.
 //
 // Inputs (decode FROM): png jpg/jpeg webp bmp tif/tiff gif heic/heif avif svg.
+//   heic/heif via ImageMagick; everything else via ffmpeg.
 // Outputs (encode TO):  png jpg webp avif  ONLY. SVG (vectorization) and HEIC
-// (niche encoder) are input-only on purpose.
+// (niche encoder) are input-only on purpose. ImageMagick writes all four output
+// formats, so a HEIC can target any of them.
 
 import { Command } from "@tauri-apps/plugin-shell";
 import { exists } from "@tauri-apps/plugin-fs";
@@ -134,13 +139,61 @@ async function resolveFfmpegCommand(): Promise<void> {
   console.error(`[imageConvert] no working ffmpeg command (tried: ${FFMPEG_CMDS.join(", ")})`);
 }
 
-// ---- ffmpeg availability probe -------------------------------------------
+// ---- magick binary resolution --------------------------------------------
+
+// ImageMagick is wired exactly like ffmpeg: a bundled resource
+// ($RESOURCE/resources/imagemagick/magick.exe) with two in-tree dev fallbacks,
+// probed in order once at startup. Used only for HEIC/HEIF inputs. magickReady
+// records whether any command launched, so the HEIC path can give a precise
+// "ImageMagick isn't installed" error instead of a generic ffmpeg one.
+const MAGICK_CMDS = ["magick-run", "magick-run-dev", "magick-run-dev-root"] as const;
+let magickCmd: string = MAGICK_CMDS[0];
+let magickReady = false;
+
+export function magickCommandName(): string {
+  return magickCmd;
+}
+
+export function magickAvailable(): boolean {
+  return magickReady;
+}
+
+// Log where the bundled resource resolves, then pick the shell command that
+// successfully launches magick (bundled resource first, in-tree dev source next).
+async function resolveMagickCommand(): Promise<void> {
+  try {
+    const resPath = await resolveResource("resources/imagemagick/magick.exe");
+    const ok = await exists(resPath);
+    console.log(`[imageConvert] resource magick path: ${resPath} (exists: ${ok})`);
+  } catch (e) {
+    console.warn("[imageConvert] resolveResource(magick) failed:", e);
+  }
+
+  for (const cmd of MAGICK_CMDS) {
+    try {
+      const out = await Command.create(cmd, ["-version"]).execute();
+      if (out.code === 0) {
+        magickCmd = cmd;
+        magickReady = true;
+        console.log(`[imageConvert] magick launches via shell command '${cmd}'`);
+        return;
+      }
+      console.warn(`[imageConvert] '${cmd}' ran but exited ${out.code}`);
+    } catch (e) {
+      console.warn(`[imageConvert] shell command '${cmd}' failed to spawn:`, e);
+    }
+  }
+  magickReady = false;
+  console.error(`[imageConvert] no working magick command (tried: ${MAGICK_CMDS.join(", ")})`);
+}
+
+// ---- availability probe ---------------------------------------------------
 
 export type ProbeResult = {
   ok: boolean; // did the ffmpeg binary run at all?
-  svg: boolean;
-  avif: boolean;
-  heif: boolean; // covers heic (heic is hevc-in-heif)
+  svg: boolean; // ffmpeg
+  avif: boolean; // ffmpeg
+  heif: boolean; // ImageMagick lists HEIC (covers heic/heif); NOT ffmpeg
 };
 
 let probe: ProbeResult | null = null;
@@ -149,29 +202,48 @@ export function probeResult(): ProbeResult | null {
   return probe;
 }
 
-// Ask ffmpeg what it can do and remember whether the three tricky decoders are
-// present. Best-effort: used to LOG at startup and to enrich an error later, not
-// to hard-block (the real test is attempting the conversion). Cached after the
-// first successful run.
+// Probe both engines and remember which tricky decoders are present. Best-effort:
+// used to LOG at startup and to enrich an error later, not to hard-block (the real
+// test is attempting the conversion). svg/avif come from ffmpeg; heif (HEIC) now
+// comes from ImageMagick, since our ffmpeg build cannot read HEIC. Cached after
+// the first run. Name kept as probeFfmpeg to avoid churn at the single call site.
 export async function probeFfmpeg(): Promise<ProbeResult> {
-  // Resolve which shell command actually launches ffmpeg (prod resource vs dev
-  // source) before probing capabilities, and use it for every spawn below.
+  // Resolve which shell command actually launches each binary (prod resource vs
+  // dev source) before probing capabilities, and use those for every spawn below.
   await resolveFfmpegCommand();
+  await resolveMagickCommand();
+
+  let ffOk = false;
+  let svg = false;
+  let avif = false;
   try {
     const fmts = await Command.create(ffmpegCmd, ["-hide_banner", "-formats"]).execute();
     const decs = await Command.create(ffmpegCmd, ["-hide_banner", "-decoders"]).execute();
     const F = (fmts.stdout + " " + fmts.stderr).toLowerCase();
     const D = (decs.stdout + " " + decs.stderr).toLowerCase();
-    probe = {
-      ok: true,
-      svg: /\bsvg\b/.test(F) || D.includes("librsvg"),
-      avif: F.includes("avif") && (D.includes(" av1") || D.includes("libdav1d") || D.includes("libaom")),
-      heif: F.includes("heif") || F.includes("heic") || D.includes("libheif"),
-    };
+    ffOk = true;
+    svg = /\bsvg\b/.test(F) || D.includes("librsvg");
+    avif = F.includes("avif") && (D.includes(" av1") || D.includes("libdav1d") || D.includes("libaom"));
   } catch (e) {
     console.error("ffmpeg probe failed (binary missing or not permitted):", e);
-    probe = { ok: false, svg: false, avif: false, heif: false };
   }
+
+  // HEIC support: magick is present AND lists the HEIC format.
+  let heif = false;
+  if (magickReady) {
+    try {
+      const list = await Command.create(magickCmd, ["-list", "format"]).execute();
+      const L = (list.stdout + " " + list.stderr).toLowerCase();
+      heif = L.includes("heic");
+    } catch (e) {
+      console.warn("magick format probe failed:", e);
+    }
+  }
+
+  probe = { ok: ffOk, svg, avif, heif };
+  console.log(
+    `[imageConvert] engines: ffmpeg=${ffOk} (svg/avif/common), magick=${magickReady} (heic=${heif})`,
+  );
   return probe;
 }
 
@@ -243,6 +315,25 @@ function buildArgs(
   return args;
 }
 
+// ImageMagick args for a HEIC/HEIF input: `magick INPUT [-resize] [-quality] OUTPUT`.
+// Order is input, operators, output. `-resize WxH>` shrinks to fit the longest side
+// and the `>` suffix means never upscale (parity with the ffmpeg path). Quality maps
+// straight through for jpg/webp/avif (magick's -quality is 0..100, higher is better);
+// png is lossless so it gets no quality flag.
+function buildMagickArgs(
+  input: string, output: string, fmt: OutputFormat, quality: number, maxDimension?: number,
+): string[] {
+  const args = [input];
+  if (maxDimension && maxDimension > 0) {
+    args.push("-resize", `${maxDimension}x${maxDimension}>`);
+  }
+  if (fmt !== "png") {
+    args.push("-quality", String(quality));
+  }
+  args.push(output);
+  return args;
+}
+
 // Turn a raw ffmpeg failure into a short, human message (the raw stderr is
 // logged, never shown). Calls out a known-missing decoder specifically.
 function friendlyError(ext: string, stderr: string): string {
@@ -251,6 +342,19 @@ function friendlyError(ext: string, stderr: string): string {
     return `This ffmpeg build can't read .${ext} files. Replace the bundled ffmpeg with a full build (gyan.dev "full").`;
   }
   if (/invalid data|does not contain|moov atom|corrupt|end of file/.test(s)) {
+    return "The file couldn't be read; it may be corrupt or an unsupported variant.";
+  }
+  return "Conversion failed.";
+}
+
+// Same idea for the ImageMagick (HEIC) path: a missing HEIC delegate is the
+// notable failure; otherwise fall back to a corrupt-file or generic message.
+function friendlyMagickError(ext: string, stderr: string): string {
+  const s = stderr.toLowerCase();
+  if (knownMissingDecoder(ext) || /no decode delegate|delegate|not authorized|unable to open/.test(s)) {
+    return `This ImageMagick build can't read .${ext} files (missing HEIC delegate).`;
+  }
+  if (/corrupt|improper image header|insufficient image data|unexpected end/.test(s)) {
     return "The file couldn't be read; it may be corrupt or an unsupported variant.";
   }
   return "Conversion failed.";
@@ -266,7 +370,15 @@ export async function convertImage(
   if (!INPUT_EXTS.has(ext)) {
     return { input, ok: false, error: `${ext ? `.${ext}` : "This file"} is not a supported image type.` };
   }
-  if (knownMissingDecoder(ext)) {
+  // HEIC/HEIF decode via ImageMagick; everything else via ffmpeg.
+  const isHeic = ext === "heic" || ext === "heif";
+  if (isHeic && !magickReady) {
+    return {
+      input, ok: false,
+      error: "ImageMagick isn't installed (needed for HEIC), drop magick.exe in resources/imagemagick",
+    };
+  }
+  if (!isHeic && knownMissingDecoder(ext)) {
     return { input, ok: false, error: `This ffmpeg build can't read .${ext} files.` };
   }
 
@@ -284,18 +396,26 @@ export async function convertImage(
   }
 
   const quality = clamp(opts.quality ?? DEFAULT_QUALITY, 1, 100);
-  const args = buildArgs(input, output, fmt, quality, opts.maxDimension);
+  const cmd = isHeic ? magickCmd : ffmpegCmd;
+  const args = isHeic
+    ? buildMagickArgs(input, output, fmt, quality, opts.maxDimension)
+    : buildArgs(input, output, fmt, quality, opts.maxDimension);
 
   let out;
   try {
-    out = await Command.create(ffmpegCmd, args).execute();
+    out = await Command.create(cmd, args).execute();
   } catch (e) {
-    console.error(`ffmpeg spawn failed (command '${ffmpegCmd}'):`, e);
-    return { input, ok: false, error: "The image converter (ffmpeg) isn't available. See setup." };
+    console.error(`${isHeic ? "magick" : "ffmpeg"} spawn failed (command '${cmd}'):`, e);
+    return {
+      input, ok: false,
+      error: isHeic
+        ? "ImageMagick isn't installed (needed for HEIC), drop magick.exe in resources/imagemagick"
+        : "The image converter (ffmpeg) isn't available. See setup.",
+    };
   }
   if (out.code !== 0) {
-    console.error(`ffmpeg exit ${out.code} for ${input}:\n${out.stderr}`);
-    return { input, ok: false, error: friendlyError(ext, out.stderr) };
+    console.error(`${isHeic ? "magick" : "ffmpeg"} exit ${out.code} for ${input}:\n${out.stderr}`);
+    return { input, ok: false, error: isHeic ? friendlyMagickError(ext, out.stderr) : friendlyError(ext, out.stderr) };
   }
   // A zero exit with no file (or an empty file) still counts as a failure.
   if (!(await exists(output))) {

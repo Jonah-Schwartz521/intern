@@ -35,7 +35,8 @@
       "resources/ggml-base.bin",
       "resources/whisper/main.exe",
       "resources/whisper/Whisper.dll",
-      "resources/ffmpeg/*"
+      "resources/ffmpeg/*",
+      "resources/imagemagick/*"
     ],
     "icon": [
       "icons/32x32.png",

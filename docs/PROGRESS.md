@@ -107,6 +107,15 @@ Living log of what is built and what is next. Update at the end of every session
 - [x] **Thumbnails, no new capability.** `ConvertThumb` reads file bytes via `fs` `readFile` (already scoped `**`) into a revoked blob URL, for webview-decodable exts only (png/jpg/jpeg/webp/gif/bmp/avif/svg); heic/heif/tiff and any read/decode failure fall back to a bordered image glyph. No asset protocol, no Rust.
 - [x] **Result card + reveal-in-folder** and the `convertBatch` path are unchanged; `runQueuedConversion` now also forwards the card's quality choice.
 
+## Done: ImageMagick as the HEIC/HEIF decoder
+
+Our full ffmpeg build reports `heif=false` and cannot read HEIC, so HEIC/HEIF now decode via a bundled ImageMagick, wired identically to ffmpeg. Everything else stays on ffmpeg. No new Rust. `tsc --noEmit` passes; a real HEIC decode still needs a GUI run to confirm.
+
+- [x] **Bundled `magick.exe`** at `src-tauri/resources/imagemagick/magick.exe` (gitignored, ~31MB), added to `bundle.resources` and run via three shell caps mirroring ffmpeg's: `magick-run` (`$RESOURCE`), `magick-run-dev`, `magick-run-dev-root` (in-tree dev fallbacks). Resolved once at startup, first that launches is cached.
+- [x] **HEIC routing in `convertImage`:** input ext `heic`/`heif` -> `magick INPUT [-resize WxH>] [-quality N] OUTPUT`; all other inputs unchanged on ffmpeg. Outputs still png/jpg/webp/avif. Quality maps straight through for jpg/webp/avif; png lossless. Resize kept for parity (shrink-only).
+- [x] **Startup probe now covers both engines.** svg/avif from ffmpeg, `heif` from `magick -list format` listing HEIC. Logs `engines: ffmpeg=… (svg/avif/common), magick=… (heic=…)`.
+- [x] **HEIC-specific errors:** magick missing -> "ImageMagick isn't installed (needed for HEIC), drop magick.exe in resources/imagemagick"; a missing HEIC delegate / corrupt file get their own messages instead of the ffmpeg wording.
+
 ## Done: file-picker rework (native dialog + drag-drop are dead on this machine)
 
 Verified working end to end in the GUI (real ffmpeg, real PNG -> WEBP into Downloads). Getting there took ruling out a chain of red herrings; the important findings are in PROJECT_MEMORY under "Image conversion: getting a file INTO the app".
