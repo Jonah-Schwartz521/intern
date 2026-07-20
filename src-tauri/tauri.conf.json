@@ -20,7 +20,8 @@
         "skipTaskbar": true,
         "alwaysOnTop": true,
         "resizable": false,
-        "visible": false
+        "visible": false,
+        "dragDropEnabled": true
       }
     ],
     "security": {
@@ -33,7 +34,8 @@
     "resources": [
       "resources/ggml-base.bin",
       "resources/whisper/main.exe",
-      "resources/whisper/Whisper.dll"
+      "resources/whisper/Whisper.dll",
+      "resources/ffmpeg/*"
     ],
     "icon": [
       "icons/32x32.png",

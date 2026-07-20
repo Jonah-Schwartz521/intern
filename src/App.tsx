@@ -5,6 +5,7 @@ import {
   ShortcutEvent,
 } from "@tauri-apps/plugin-global-shortcut";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   isPermissionGranted,
   requestPermission,
@@ -16,6 +17,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { open } from "@tauri-apps/plugin-dialog";
+import { readFile, writeFile, mkdir } from "@tauri-apps/plugin-fs";
+import { tempDir, downloadDir } from "@tauri-apps/api/path";
 import { login, disconnect, isConnected, getAccount, refreshAccount } from "./msauth";
 import { listEvents, createEvent, deleteEvent, updateEvent } from "./calendar";
 import { transcribe } from "./transcribe";
@@ -25,12 +28,23 @@ import {
   DEFAULT_DOCK_EDGE,
   DOCK_ANIM_MS,
   dockWindow,
-  isModalOpen,
   duringModal,
   loadDockEdge,
   setDockEdge,
   type DockEdge,
 } from "./dock";
+import {
+  OUTPUT_FORMATS,
+  convertBatch,
+  isConvertibleImage,
+  revealInFolder,
+  filenameOf as imageFilenameOf,
+  extOf,
+  probeFfmpeg,
+  type OutputFormat,
+  type ConvertOptions,
+  type ConvertResult,
+} from "./imageConvert";
 import { isSupportedLang, highlightCode } from "./highlight";
 import {
   assembleContextForRequest,
@@ -297,6 +311,39 @@ const TOOLS = [
       required: ["subject", "body"],
     },
   },
+  {
+    name: "convert_image",
+    description:
+      "Convert one or more image files to a different format, locally. Use when the user asks to convert, change the format of, export, or 'make this a <format>' image. Accepts inputs: png, jpg/jpeg, webp, bmp, tiff, gif, heic/heif, avif, svg. The result is written next to the original file. Set `format` ONLY when the user clearly names a target format (one of png, jpg, webp, avif; never svg or heic as an output). If the user did NOT name a target format, OMIT `format`: an inline card opens with the file(s) preselected so the user can choose the format themselves, so do not ask which format, just call this with the path(s). IMPORTANT: this tool needs absolute file path(s). If the user gives only a filename or says 'this image' without a path already known from the conversation, call search_files first to resolve the absolute path, then call this. If you cannot get a path, tell the user to drag the image onto Splerm.",
+    input_schema: {
+      type: "object",
+      properties: {
+        paths: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Absolute path(s) to the image file(s) to convert, e.g. 'C:\\\\Users\\\\Jonah\\\\Pictures\\\\shot.png'. Provide one or many (batch).",
+        },
+        format: {
+          type: "string",
+          enum: ["png", "jpg", "webp", "avif"],
+          description:
+            "Target format, one of png, jpg, webp, avif. Include ONLY when the user named a format; omit it to let the user pick one in the inline card.",
+        },
+        quality: {
+          type: "number",
+          description:
+            "Optional 1-100 quality for jpg/webp/avif (higher is better). Omit for the high-quality default (90). Ignored for png (lossless).",
+        },
+        max_dimension: {
+          type: "number",
+          description:
+            "Optional cap on the longest side in pixels; larger images are scaled down keeping aspect ratio (never upscaled). Omit for no resize.",
+        },
+      },
+      required: ["paths"],
+    },
+  },
 ];
 
 // UI sinks so runTool (which lives outside the component) can report progress and
@@ -306,6 +353,10 @@ let uiPush: ((m: Message) => void) | null = null;
 // Transient warning sink (context-bin over budget, etc.). Registered by the App
 // component; routed to the same inline notice bar used for command notices.
 let uiWarn: ((s: string) => void) | null = null;
+// Convert-card sink: hand a set of image paths to the inline conversion card so a
+// tool call (natural language with no target format) can stage a conversion the
+// same way a drag-drop or the menu picker does. Registered by the App component.
+let uiConvert: ((paths: string[]) => void) | null = null;
 
 // Copy text to the clipboard; falls back to a hidden textarea when the async
 // Clipboard API is unavailable. Returns whether it succeeded.
@@ -601,6 +652,45 @@ async function runTool(name: string, input: any): Promise<string> {
       console.error("transcribe_file failed:", e);
       return "The transcription failed. Tell the user to try again.";
     }
+  }
+
+  if (name === "convert_image") {
+    const paths: string[] = Array.isArray(input.paths)
+      ? input.paths.filter((p: unknown): p is string => typeof p === "string")
+      : typeof input.path === "string"
+      ? [input.path]
+      : [];
+    if (paths.length === 0) {
+      return "No image path was provided. Ask the user to drag the image onto Splerm, or give the full file path.";
+    }
+    const fmt = input.format as OutputFormat;
+    if (!OUTPUT_FORMATS.includes(fmt)) {
+      // No usable target format (omitted, or an input-only one like svg/heic):
+      // stage the files in the inline card and let the user pick the format
+      // rather than erroring out.
+      uiConvert?.(paths);
+      const many = paths.length > 1;
+      return `A conversion card is now shown with ${
+        many ? `${paths.length} files` : imageFilenameOf(paths[0])
+      } preselected. Tell the user in one line to pick a target format (PNG, JPG, WEBP, or AVIF) and click Convert. Do not list the files.`;
+    }
+    const opts = {
+      quality: typeof input.quality === "number" ? input.quality : undefined,
+      maxDimension: typeof input.max_dimension === "number" ? input.max_dimension : undefined,
+    };
+    const label = fmt.toUpperCase();
+    uiStatus?.(`Converting ${paths.length} image${paths.length === 1 ? "" : "s"} to ${label}...`);
+    const results = await convertBatch(paths, fmt, opts, (done, total) =>
+      uiStatus?.(`Converting ${done}/${total} to ${label}...`),
+    );
+    uiPush?.({ role: "intern", text: "", conversion: { format: fmt, results } });
+    const ok = results.filter((r) => r.ok).length;
+    const failed = results.length - ok;
+    if (ok === 0) {
+      const firstErr = results.find((r) => r.error)?.error ?? "Conversion failed.";
+      return `None of the ${results.length} image${results.length === 1 ? "" : "s"} converted (${firstErr}). A result card was shown; explain the failure briefly in one line.`;
+    }
+    return `Converted ${ok} of ${results.length} image${results.length === 1 ? "" : "s"} to ${label}${failed ? `; ${failed} failed` : ""}. A result card with the output path(s) and a reveal-in-folder button was shown to the user. Confirm briefly and do NOT list the paths again.`;
   }
 
   return `Unknown tool: ${name}`;
@@ -964,6 +1054,14 @@ const IconFile = () => (
     <path d="M9 17l6 0" />
   </svg>
 );
+const IconImage = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M15 8h.01" />
+    <path d="M3 6a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v12a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3z" />
+    <path d="M3 16l5 -5c.928 -.893 2.072 -.893 3 0l5 5" />
+    <path d="M14 14l1 -1c.928 -.893 2.072 -.893 3 0l3 3" />
+  </svg>
+);
 const IconChevron = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M6 9l6 6l6 -6" />
@@ -1190,6 +1288,173 @@ function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
   );
 }
 
+// Extensions WebView2 can decode in an <img>, so a thumbnail is worth reading.
+// Everything else (heic/heif, tiff) falls back to the glyph placeholder. On a
+// read or decode failure we also fall back, so being generous here is safe.
+const THUMBABLE = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "svg"]);
+const THUMB_MIME: Record<string, string> = {
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+  webp: "image/webp", gif: "image/gif", bmp: "image/bmp",
+  avif: "image/avif", svg: "image/svg+xml",
+};
+
+// Small preview of a picked/dropped image. Reads the file bytes via the fs plugin
+// (already permitted) into a blob URL; no asset protocol or Rust needed. Revokes
+// the URL on unmount. Shows a bordered image glyph when the format is not one the
+// webview can render, or when the read/decode fails.
+function ConvertThumb({ path }: { path: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const ext = extOf(path);
+    if (!THUMBABLE.has(ext)) return;
+    let alive = true;
+    let objUrl: string | null = null;
+    readFile(path)
+      .then((bytes) => {
+        if (!alive) return;
+        objUrl = URL.createObjectURL(new Blob([bytes], { type: THUMB_MIME[ext] }));
+        setUrl(objUrl);
+      })
+      .catch((e) => console.error("thumbnail read failed:", e));
+    return () => {
+      alive = false;
+      if (objUrl) URL.revokeObjectURL(objUrl);
+    };
+  }, [path]);
+
+  if (url) {
+    return <img className="convert-thumb" src={url} alt="" onError={() => setUrl(null)} />;
+  }
+  return (
+    <span className="convert-thumb convert-thumb-empty" aria-hidden="true">
+      <IconImage />
+    </span>
+  );
+}
+
+// Inline conversion card: the single staging step every entry point converges on
+// (drag-drop, the ··· menu picker, and a natural-language request with no target
+// format). Lists the selected file(s) with a thumbnail + monospace name, a target
+// format picker, an optional quality slider for the lossy encoders, and a Convert
+// button. One format choice applies to the whole batch.
+function ConvertPicker({
+  paths,
+  onConvert,
+  onCancel,
+}: {
+  paths: string[];
+  onConvert: (fmt: OutputFormat, opts: ConvertOptions) => void;
+  onCancel: () => void;
+}) {
+  const [fmt, setFmt] = useState<OutputFormat | null>(null);
+  const [quality, setQuality] = useState(90);
+  const many = paths.length > 1;
+  // Quality only means something for the lossy encoders; png is lossless.
+  const showQuality = fmt === "jpg" || fmt === "webp" || fmt === "avif";
+
+  return (
+    <div className="convert-picker">
+      <div className="convert-picker-head">
+        Convert{" "}
+        {many && <span className="convert-picker-name">{paths.length} files </span>}
+        to:
+      </div>
+      <ul className="convert-file-list">
+        {paths.map((p) => (
+          <li key={p} className="convert-file">
+            <ConvertThumb path={p} />
+            <span className="convert-file-name" title={p}>
+              {imageFilenameOf(p)}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <div className="convert-fmt-row">
+        {OUTPUT_FORMATS.map((f) => (
+          <button
+            key={f}
+            className={`convert-fmt-btn${fmt === f ? " active" : ""}`}
+            onClick={() => setFmt(f)}
+          >
+            {f.toUpperCase()}
+          </button>
+        ))}
+      </div>
+      {showQuality && (
+        <div className="convert-quality">
+          <label className="convert-quality-label" htmlFor="convert-quality-slider">
+            Quality
+          </label>
+          <input
+            id="convert-quality-slider"
+            className="convert-quality-slider"
+            type="range"
+            min={1}
+            max={100}
+            value={quality}
+            onChange={(e) => setQuality(Number(e.currentTarget.value))}
+          />
+          <span className="convert-quality-val">{quality}</span>
+        </div>
+      )}
+      <div className="convert-actions">
+        <button
+          className="convert-go"
+          disabled={fmt === null}
+          onClick={() => fmt && onConvert(fmt, showQuality ? { quality } : {})}
+        >
+          {many ? `Convert ${paths.length}` : "Convert"}
+        </button>
+        <button className="convert-fmt-btn convert-cancel" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Result card for a finished conversion: per-file outcome and a reveal action for
+// each output. Rendered from a message's `conversion` payload.
+function ConversionCard({
+  format,
+  results,
+}: {
+  format: string;
+  results: ConvertResult[];
+}) {
+  const ok = results.filter((r) => r.ok);
+  const failed = results.filter((r) => !r.ok);
+  return (
+    <div className="convert-card">
+      <div className="convert-card-head">
+        {ok.length}/{results.length} converted to {format.toUpperCase()}
+      </div>
+      {ok.map((r, i) => (
+        <div key={`ok-${i}`} className="convert-row">
+          <span className="convert-out" title={r.output}>
+            {imageFilenameOf(r.output!)}
+          </span>
+          <button
+            className="convert-reveal"
+            onClick={() => revealInFolder(r.output!).catch((e) => console.error("reveal failed:", e))}
+            title={r.output}
+          >
+            Reveal
+          </button>
+        </div>
+      ))}
+      {failed.map((r, i) => (
+        <div key={`err-${i}`} className="convert-row convert-failed">
+          <span className="convert-out" title={r.input}>
+            {imageFilenameOf(r.input)}
+          </span>
+          <span className="convert-err">{r.error ?? "failed"}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -1219,6 +1484,11 @@ function App() {
   const [contextFiles, setContextFiles] = useState<ContextFile[]>([]);
   const [contextBusy, setContextBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  // Image conversion: images dropped/picked wait here for a target-format choice
+  // (rendered as an inline ConvertPicker). Null when nothing is pending.
+  const [convertQueue, setConvertQueue] = useState<
+    { paths: string[]; outDir?: string } | null
+  >(null);
   // Docked-panel summon state. `shown` drives the slide-in/out (a CSS class on
   // the container); visibleRef tracks whether the window is up, readable from the
   // hotkey/blur/Esc handlers without stale closures.
@@ -1233,6 +1503,9 @@ function App() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Hidden HTML file input used as the image picker (the native Tauri dialog
+  // returns null on this machine). Triggered by pickImagesToConvert.
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const rowMenuRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
   // Same value as `atBottom`, readable from effects without making them depend
@@ -1261,10 +1534,17 @@ function App() {
     uiStatus = setStatus;
     uiPush = (m) => setMessages((prev) => [...prev, m]);
     uiWarn = setNotice;
+    uiConvert = (paths) => {
+      stickToBottom();
+      // Natural-language paths are real files: output stays next to the original
+      // (no outDir override).
+      setConvertQueue({ paths });
+    };
     return () => {
       uiStatus = null;
       uiPush = null;
       uiWarn = null;
+      uiConvert = null;
     };
   }, []);
 
@@ -1505,22 +1785,11 @@ function App() {
     };
   }, []);
 
-  // Summon/dismiss behavior: hide on blur and on Esc, so the panel acts like an
-  // overlay you summon and dismiss, not a window you manage.
+  // Dismiss behavior: Esc hides the panel. Blur / focus-loss deliberately does
+  // NOT hide it, this is a docked panel you work alongside, so clicking your
+  // editor or opening a native file dialog must not dismiss it. The only other
+  // ways to hide are the global hotkey (toggle) and the titlebar close button.
   useEffect(() => {
-    const win = getCurrentWindow();
-    let unlisten: (() => void) | undefined;
-    win
-      .onFocusChanged(({ payload: focused }) => {
-        // Losing focus dismisses the panel, EXCEPT while one of our own native
-        // dialogs (file picker, Outlook OAuth) is open: those steal focus without
-        // the user actually leaving Splerm, so hiding then would be wrong.
-        if (!focused && visibleRef.current && !isModalOpen()) hidePanel();
-      })
-      .then((u) => {
-        unlisten = u;
-      });
-
     const onKey = (e: KeyboardEvent) => {
       // Esc dismisses the panel, unless the command palette is open (its own Esc
       // handler closes the palette first).
@@ -1530,7 +1799,6 @@ function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => {
-      unlisten?.();
       window.removeEventListener("keydown", onKey);
     };
   }, []);
@@ -1748,12 +2016,17 @@ function App() {
   };
 
   // Load the bin on launch, and wire native OS file drops (Tauri gives real
-  // filesystem paths here, which DOM drop events do not). A drag over the window
-  // opens the panel so the drop target is visible; the drop ingests the paths.
+  // filesystem paths here, which DOM drop events do not). CRITICAL: native
+  // drag-drop events fire on the WEBVIEW, not the window, so this listens on
+  // getCurrentWebview(); a window-level listener never fires. HTML5 ondrop/
+  // ondragover are deliberately NOT used: with native drag-drop on they don't
+  // fire and wouldn't give real file paths anyway. A drag over opens the panel so
+  // the drop target is visible; the drop routes the paths.
   useEffect(() => {
     void refreshContext();
     let unlisten: (() => void) | undefined;
-    getCurrentWindow()
+    let cancelled = false;
+    getCurrentWebview()
       .onDragDropEvent((event) => {
         const p = event.payload;
         if (p.type === "enter" || p.type === "over") {
@@ -1761,18 +2034,150 @@ function App() {
           setDragOver(true);
         } else if (p.type === "drop") {
           setDragOver(false);
-          void ingestPaths(p.paths);
+          // Split by type: images go to the conversion picker, everything else to
+          // the context bin (images were never ingestable there anyway). A mixed
+          // drop does both.
+          const images = p.paths.filter(isConvertibleImage);
+          const rest = p.paths.filter((x) => !isConvertibleImage(x));
+          if (rest.length) void ingestPaths(rest);
+          if (images.length) {
+            stickToBottom();
+            // Dropped files are real paths: output next to the original.
+            setConvertQueue({ paths: images });
+          }
         } else {
+          // 'leave'
           setDragOver(false);
         }
       })
       .then((u) => {
-        unlisten = u;
+        // If the effect was already torn down (hot-reload / unmount) before the
+        // listener resolved, unlisten immediately so it isn't left dangling.
+        if (cancelled) u();
+        else unlisten = u;
       });
     return () => {
+      cancelled = true;
       unlisten?.();
     };
   }, []);
+
+  // Probe the bundled ffmpeg once on launch and log which tricky decoders are
+  // available, so a bad/missing build is obvious in the console (and the probe is
+  // cached for nicer conversion errors). Never blocks the UI.
+  useEffect(() => {
+    probeFfmpeg()
+      .then((p) => {
+        if (!p.ok) {
+          console.warn("[imageConvert] ffmpeg not available (drop the exe in resources/ffmpeg)");
+        } else {
+          console.log(`[imageConvert] probe: svg=${p.svg} avif=${p.avif} heif=${p.heif}`);
+        }
+      })
+      .catch((e) => console.error("[imageConvert] probe error:", e));
+  }, []);
+
+  // Run a card-staged conversion: the user has picked the target format (and,
+  // optionally, a quality) in the inline card, so batch-convert and drop a result
+  // card in the chat. Every entry point (drag-drop, menu, natural language) funnels
+  // through the card and then here.
+  const runQueuedConversion = async (
+    paths: string[],
+    fmt: OutputFormat,
+    opts: ConvertOptions = {},
+  ) => {
+    setConvertQueue(null);
+    stickToBottom();
+    setThinking(true);
+    const label = fmt.toUpperCase();
+    setStatus(`Converting to ${label}...`);
+    try {
+      const results = await convertBatch(paths, fmt, opts, (done, total) =>
+        setStatus(`Converting ${done}/${total} to ${label}...`),
+      );
+      setMessages((prev) => [
+        ...prev,
+        { role: "intern", text: "", conversion: { format: fmt, results } },
+      ]);
+    } catch (e) {
+      console.error("queued conversion failed:", e);
+      setMessages((prev) => [
+        ...prev,
+        { role: "intern", text: "Image conversion failed, try again." },
+      ]);
+    } finally {
+      setThinking(false);
+      setStatus("");
+    }
+  };
+
+  // Overflow-menu action: pick image(s) to convert. The native Tauri dialog
+  // returns null on this machine (confirmed: not elevation, transparency, the
+  // build, nor the dialog options), so we trigger the webview's own HTML file
+  // input instead, which is a different code path (Chromium's picker). The actual
+  // work happens in onHtmlFilesPicked when the input fires.
+  const pickImagesToConvert = () => {
+    setRowMenuOpen(false);
+    fileInputRef.current?.click();
+  };
+
+  // Fires when the HTML file input yields files. The browser gives us File objects
+  // with bytes but no path, so we write each one to a temp copy (keeping its
+  // original name for a clean output name) and hand those paths to the card. The
+  // conversion output is redirected to Downloads since the temp folder isn't where
+  // the user wants their file. This is the picker path that works on this machine.
+  const onHtmlFilesPicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.currentTarget.files ?? []);
+    // Reset so picking the same file again still fires onChange.
+    e.currentTarget.value = "";
+    if (files.length === 0) return;
+
+    stickToBottom();
+    setThinking(true);
+    setStatus("Preparing image...");
+    try {
+      const base = (await tempDir()).replace(/[\\/]+$/, "");
+      const sep = base.includes("\\") ? "\\" : "/";
+      const convDir = `${base}${sep}splerm-conv`;
+      try {
+        await mkdir(convDir, { recursive: true });
+      } catch {
+        // Already exists: fine.
+      }
+
+      const paths: string[] = [];
+      for (const f of files) {
+        // Strip anything that isn't legal in a Windows filename, and any path
+        // separators, so a hostile name can't escape the temp dir.
+        const safe = f.name.replace(/[\\/:*?"<>|]/g, "_") || "image";
+        const bytes = new Uint8Array(await f.arrayBuffer());
+        const p = `${convDir}${sep}${safe}`;
+        await writeFile(p, bytes);
+        paths.push(p);
+      }
+
+      // Send the converted file somewhere findable (Downloads); fall back to the
+      // temp folder if that can't be resolved.
+      let outDir: string | undefined;
+      try {
+        outDir = await downloadDir();
+      } catch {
+        outDir = convDir;
+      }
+
+      setNotice("");
+      setConvertQueue({ paths, outDir });
+    } catch (err) {
+      console.error("[htmlpick] staging failed:", err);
+      stickToBottom();
+      setNotice(
+        `Could not read the image: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setThinking(false);
+      setStatus("");
+    }
+  };
 
   const openSettings = () => {
     setRowMenuOpen(false);
@@ -1980,6 +2385,14 @@ function App() {
 
   return (
     <main className={`container${shown ? " shown" : ""}`}>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,.gif,.heic,.heif,.avif,.svg"
+        multiple
+        style={{ display: "none" }}
+        onChange={onHtmlFilesPicked}
+      />
       <header className="titlebar" data-tauri-drag-region>
         <span className="brand">Splerm</span>
         <div className="window-controls">
@@ -2017,10 +2430,12 @@ function App() {
           <div
             key={i}
             className={`message ${msg.role}${
-              showCopyBubble || msg.draft != null ? " card" : ""
+              showCopyBubble || msg.draft != null || msg.conversion != null ? " card" : ""
             }${msg.draft ? " compose" : ""}`}
           >
-            {msg.draft ? (
+            {msg.conversion ? (
+              <ConversionCard format={msg.conversion.format} results={msg.conversion.results} />
+            ) : msg.draft ? (
               <ComposeCard initial={msg.draft} onCreate={handleCreateDraft} />
             ) : msg.role === "intern" ? (
               <div className="md">
@@ -2105,6 +2520,18 @@ function App() {
           </div>
         )}
         {notice && <div className="notice">{notice}</div>}
+        {convertQueue && convertQueue.paths.length > 0 && (
+          <ConvertPicker
+            paths={convertQueue.paths}
+            onConvert={(fmt, opts) =>
+              runQueuedConversion(convertQueue.paths, fmt, {
+                ...opts,
+                outDir: convertQueue.outDir,
+              })
+            }
+            onCancel={() => setConvertQueue(null)}
+          />
+        )}
         {thinking && (
           <div className="message intern thinking">{status || "..."}</div>
         )}
@@ -2168,6 +2595,9 @@ function App() {
               </button>
               <button className="row-menu-item" onClick={transcribeFileFromMenu}>
                 <IconFile /> Transcribe file
+              </button>
+              <button className="row-menu-item" onClick={pickImagesToConvert}>
+                <IconImage /> Convert image
               </button>
               <div className="row-menu-sep" />
               <div className="row-menu-label">

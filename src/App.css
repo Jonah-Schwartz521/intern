@@ -1147,3 +1147,213 @@ body {
   background: var(--bg);
   color: var(--text);
 }
+
+/* Image conversion: the drop/pick format picker, and the result card. Both live
+   inside a .message.intern.card box, so these only style the internals. Format
+   buttons use copper text+border for emphasis (no background fill added). */
+.convert-picker {
+  align-self: flex-start;
+  max-width: 80%;
+  padding: 10px 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.convert-picker-head {
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.convert-picker-name {
+  font-family: var(--mono);
+  color: var(--copper);
+}
+
+.convert-fmt-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.convert-fmt-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--copper-dim);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--copper);
+  font-family: var(--sans);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.convert-fmt-btn:hover {
+  border-color: var(--copper);
+  color: var(--text);
+}
+
+.convert-fmt-btn.convert-cancel {
+  border-color: var(--border);
+  color: var(--text-dim);
+}
+
+.convert-card-head {
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.convert-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 0;
+}
+
+.convert-out {
+  flex: 1 1 auto;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.convert-reveal {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--sans);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.convert-reveal:hover {
+  color: var(--copper);
+  border-color: var(--copper-dim);
+}
+
+.convert-row.convert-failed .convert-out {
+  color: var(--text-dim);
+}
+
+.convert-err {
+  flex: 0 1 auto;
+  font-family: var(--sans);
+  font-size: 12px;
+  color: #d9776b;
+}
+
+/* Inline conversion card: the file list (thumbnail + monospace name), the
+   selectable format buttons, the optional quality slider, and the Convert
+   action. Selection emphasis uses border + inset shadow (no fill) so it stays
+   within the layout rules. */
+.convert-file-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.convert-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.convert-thumb {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  object-fit: cover;
+}
+
+.convert-thumb-empty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+}
+
+.convert-file-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.convert-fmt-btn.active {
+  border-color: var(--copper);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--copper);
+}
+
+.convert-quality {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.convert-quality-label {
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.convert-quality-slider {
+  flex: 1 1 auto;
+  accent-color: var(--copper);
+}
+
+.convert-quality-val {
+  flex: 0 0 auto;
+  min-width: 2ch;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--copper);
+}
+
+.convert-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.convert-go {
+  padding: 6px 14px;
+  border: 1px solid var(--copper);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--copper);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.convert-go:hover:not(:disabled) {
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--copper);
+}
+
+.convert-go:disabled {
+  border-color: var(--border);
+  color: var(--text-dim);
+  cursor: default;
+}

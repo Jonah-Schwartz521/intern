@@ -24,14 +24,24 @@
     "notification:default",
     "dialog:allow-open",
     "clipboard-manager:allow-read-text",
+    "core:path:default",
     {
       "comment": "Read any file the user picks for the context bin. A reference file can live anywhere the user browses (Documents, but also project dirs like C:\\dev), so read is broad by necessity; narrow it to e.g. $HOME/** if you only ever add files from home. Read only, no write.",
       "identifier": "fs:allow-read-file",
       "allow": [{ "path": "**" }]
     },
     {
+      "comment": "Voice temp file, and temp copies of HTML-picked images to convert (the native file dialog returns null on some machines, so images come in as browser File objects with bytes but no path; we stage them here for ffmpeg).",
       "identifier": "fs:allow-write-file",
-      "allow": [{ "path": "$TEMP/intern-voice-input.*" }]
+      "allow": [
+        { "path": "$TEMP/intern-voice-input.*" },
+        { "path": "$TEMP/splerm-conv/*" }
+      ]
+    },
+    {
+      "comment": "Create the temp staging dir for HTML-picked image conversions.",
+      "identifier": "fs:allow-mkdir",
+      "allow": [{ "path": "$TEMP/splerm-conv" }]
     },
     {
       "identifier": "fs:allow-remove",
@@ -63,8 +73,31 @@
           "name": "whisper-run",
           "cmd": "$RESOURCE/resources/whisper/main.exe",
           "args": ["-m", { "validator": ".+" }, "-f", { "validator": ".+" }, "-nt"]
+        },
+        {
+          "comment": "Full ffmpeg build (gyan.dev 'full' static exe) for local image format conversion. args:true because the flags are built per output format (codec/quality/scale) in imageConvert.ts; the cmd is fixed to our bundled binary.",
+          "name": "ffmpeg-run",
+          "cmd": "$RESOURCE/resources/ffmpeg/ffmpeg.exe",
+          "args": true
+        },
+        {
+          "comment": "Dev fallback for ffmpeg. Under `tauri dev` the bundled $RESOURCE copy is often absent (the resource copy does not re-run when the exe is dropped into the glob dir), so this points at the in-tree source relative to the working dir (src-tauri under `tauri dev`). Harmless in production: that relative path does not exist there, so `ffmpeg-run` is chosen instead. imageConvert.ts probes prod first and only uses this if it works.",
+          "name": "ffmpeg-run-dev",
+          "cmd": "resources/ffmpeg/ffmpeg.exe",
+          "args": true
+        },
+        {
+          "comment": "Second dev fallback, same purpose as ffmpeg-run-dev but resolved from the repo root, in case `tauri dev` runs the binary with cwd at the project root rather than src-tauri.",
+          "name": "ffmpeg-run-dev-root",
+          "cmd": "src-tauri/resources/ffmpeg/ffmpeg.exe",
+          "args": true
         }
       ]
+    },
+    {
+      "comment": "Image conversion picks a non-colliding output name next to the input; existence check only, no read/write of contents.",
+      "identifier": "fs:allow-exists",
+      "allow": [{ "path": "**" }]
     },
     "autostart:default"
   ]
