@@ -41,8 +41,10 @@ body {
      outside our transformed content). This border lives on .container, the
      element that slides, so it moves out with the panel and vanishes cleanly on
      hide instead of lingering. box-sizing: border-box keeps the size unchanged. */
-  border: 1px solid #3a332c;
-  /* Clip the panel content to the rounded inner corners below. */
+  border: 1px solid #4d453b;
+  /* All four corners rounded so the outline is symmetric. */
+  border-radius: 10px;
+  /* Clip the panel content to the rounded corners. */
   overflow: hidden;
   /* Slide the whole panel in from / out to the docked edge. Transform only, so
      it never touches layout. Duration matches DOCK_ANIM_MS in dock.ts. The
@@ -50,24 +52,19 @@ body {
   transition: transform 180ms ease-out;
 }
 
-/* Docked-edge styling. The edge touching the screen border stays square; only
-   the two inner corners round, so the panel reads as docked to that edge. Each
-   edge also gets its off-screen start transform (the resting, hidden position);
-   .shown slides it back to zero. */
+/* Docked-edge styling. All four corners round uniformly (set on .container);
+   each edge only needs its off-screen start transform (the resting, hidden
+   position), and .shown slides it back to zero. */
 :root[data-dock="right"] .container {
-  border-radius: 10px 0 0 10px;
   transform: translateX(100%);
 }
 :root[data-dock="left"] .container {
-  border-radius: 0 10px 10px 0;
   transform: translateX(-100%);
 }
 :root[data-dock="top"] .container {
-  border-radius: 0 0 10px 10px;
   transform: translateY(-100%);
 }
 :root[data-dock="bottom"] .container {
-  border-radius: 10px 10px 0 0;
   transform: translateY(100%);
 }
 :root[data-dock] .container.shown {
@@ -922,6 +919,116 @@ body {
   color: var(--text-dim);
   font-size: 13px;
   font-style: italic;
+}
+
+/* /cost readout. Same in-stream, no-modal treatment as the resume list: a
+   bordered card with an uppercase head, one block per running total, and an
+   inline reset affordance that flips to a confirm before wiping all-time. */
+.cost-readout {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+}
+
+.cost-head {
+  color: var(--text-dim);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 4px 6px 2px;
+}
+
+.cost-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 6px;
+}
+
+.cost-block-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 4px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cost-block-title {
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cost-block-total {
+  color: var(--copper);
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.cost-model-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 4px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.cost-model-name {
+  color: var(--text-dim);
+}
+
+.cost-model-nums {
+  flex: 0 0 auto;
+}
+
+.cost-empty {
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 2px 4px;
+}
+
+.cost-cache-note {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 4px 4px 0;
+}
+
+/* Reset row: a quiet text button by default, promoted to the shared confirm-bar
+   layout (question + danger/cancel) once armed. */
+.cost-reset {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 2px 4px;
+}
+
+.cost-reset.confirm {
+  justify-content: space-between;
+}
+
+.cost-reset-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.cost-reset-btn:hover {
+  color: var(--copper);
 }
 
 /* Context bin: collapsible panel below the titlebar for the reference files fed

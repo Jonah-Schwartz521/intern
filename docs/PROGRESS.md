@@ -33,6 +33,15 @@ Living log of what is built and what is next. Update at the end of every session
 
 (Earlier: hotkey + tray, chat UI, reminders, file search/open, Outlook calendar CRUD, autostart, Markdown rendering, model routing + prompt caching.)
 
+## Done: real-time token/cost tracker + /cost command
+
+Observes usage on every Claude response (no change to how calls are made) and accumulates it per model, with a `/cost` readout in the slash menu. Pure frontend + store, no Rust. `tsc --noEmit` passes; a live-numbers check still wants a GUI run.
+
+- [x] **Tracking layer (`src/cost.ts`).** After every response, `recordUsage(model, usage)` maps the four usage fields to their own buckets: `input_tokens`->input, `cache_creation_input_tokens`->cache-write, `cache_read_input_tokens`->cache-read, `output_tokens`->output. Kept per model (each call captures which model it used) in two totals: SESSION (reset each launch) and ALL-TIME, both persisted to `cost.json`. Wired at both call sites in App.tsx (`askClaude`'s tool-use loop records each iteration's response; `generateTitle`'s Haiku call records too).
+- [x] **Prices as a config constant** (`PRICES`, per million tokens, per model), seeded Haiku 4.5 (in $1 / out $5 / cw $1.25 / cr $0.10) and Opus 4.8 (in $5 / out $25 / cw $6.25 / cr $0.50), with a comment linking platform.claude.com/docs/en/about-claude/pricing. $ is derived on demand, never stored, so re-pricing is a one-line edit. Verified each bucket bills at its own rate (1M-of-each: Haiku $7.35, Opus $36.75).
+- [x] **`/cost` command** in the slash palette ("Show token usage and spend"), matching /resume style: an inline in-stream card with This-session and All-time blocks (each: total $, total tokens, per-model tokens+$), plus a cache-reads note so caching is visible.
+- [x] **Reset all-time** via `/cost reset` or a reset affordance in the readout, both gated by an inline confirm (shared confirm-bar treatment). Session total is never touched by the reset.
+
 ## Done: context bin (data + ingestion layer, no UI yet)
 
 - [x] **Ingestion + storage.** `src/contextBin.ts` (records + store + public API) and `src/extract.ts` (text extraction). Supported types: `.txt` / `.md` (UTF-8), `.pdf` (pdfjs-dist), `.docx` (mammoth). Unsupported types are skipped with a reason, never fail the batch. Records `{ id, filename, path, mimeType, extractedText, charCount, tokenCount, addedAt }` persist to `context-bin.json` via tauri-plugin-store (source of truth). Token count is a `chars/4` estimate (TODO: real tokenizer). Public API: `addFiles(paths)`, `removeFile(id)`, `listFiles()`, `getTotalTokens()`, plus `pickContextFiles()` (dialog-plugin picker). All frontend, no Rust.

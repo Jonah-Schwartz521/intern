@@ -58,6 +58,13 @@ import {
 } from "./contextBin";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import {
+  initCost,
+  recordUsage,
+  costSnapshot,
+  resetAllTime,
+  type TotalSummary,
+} from "./cost";
+import {
   type Message,
   type Session,
   newSessionId,
@@ -737,6 +744,10 @@ async function askClaude(history: Message[]): Promise<string> {
 
     const data = await response.json();
 
+    // Observe (never alter) the usage on this response and accumulate it. Every
+    // iteration of the tool-use loop is its own billed response, so record each.
+    void recordUsage(model, data.usage);
+
     if (data.stop_reason === "tool_use") {
       apiMessages.push({ role: "assistant", content: data.content });
 
@@ -795,6 +806,8 @@ async function generateTitle(history: Message[]): Promise<string | null> {
     }
 
     const data = await response.json();
+    // Title generation is a real (cheap) Haiku call, so its usage counts too.
+    void recordUsage(HAIKU, data.usage);
     const block = data.content?.find((b: any) => b.type === "text");
     let title: string = block?.text ?? "";
     title = stripEmDashes(title)
@@ -1030,12 +1043,6 @@ const IconX = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M18 6l-12 12" />
     <path d="M6 6l12 12" />
-  </svg>
-);
-const IconSettings = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z" />
-    <path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" />
   </svg>
 );
 const IconLayout = () => (
@@ -1420,6 +1427,42 @@ function ConversionCard({
   );
 }
 
+// Spend is often sub-cent, so show 4 decimals ($0.0001 = 1/100 of a cent) rather
+// than rounding tiny amounts to $0.00.
+function fmtUsd(n: number): string {
+  return "$" + n.toFixed(4);
+}
+
+// One running total in the /cost readout: a header line (total $ + total tokens),
+// a per-model breakdown, and a note of how much came from the cheap cache reads.
+function CostBlock({ title, s }: { title: string; s: TotalSummary }) {
+  return (
+    <div className="cost-block">
+      <div className="cost-block-head">
+        <span className="cost-block-title">{title}</span>
+        <span className="cost-block-total">
+          {fmtUsd(s.cost)} · {s.tokens.toLocaleString()} tok
+        </span>
+      </div>
+      {s.perModel.length === 0 ? (
+        <div className="cost-empty">No usage yet.</div>
+      ) : (
+        s.perModel.map((m) => (
+          <div className="cost-model-row" key={m.model}>
+            <span className="cost-model-name">{m.label}</span>
+            <span className="cost-model-nums">
+              {m.tokens.toLocaleString()} tok · {fmtUsd(m.cost)}
+            </span>
+          </div>
+        ))
+      )}
+      <div className="cost-cache-note">
+        {s.cacheReadTokens.toLocaleString()} tok from cache reads ({fmtUsd(s.cacheReadCost)})
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -1435,6 +1478,12 @@ function App() {
   // /clear is destructive and unrecoverable, so it asks first: this holds the
   // pending confirmation, shown inline in the stream.
   const [confirmClear, setConfirmClear] = useState(false);
+  // /cost: the inline token/spend readout (null when closed), and whether the
+  // reset-all-time affordance is awaiting confirmation. Neither is persisted; the
+  // readout is a live snapshot, re-taken each time it opens or the total changes.
+  const [costReadout, setCostReadout] =
+    useState<{ session: TotalSummary; allTime: TotalSummary } | null>(null);
+  const [confirmResetCost, setConfirmResetCost] = useState(false);
   // Whether the stream is scrolled to (or near) the bottom. Drives both the
   // follow-on-new-content behavior and the jump-to-bottom button.
   const [atBottom, setAtBottom] = useState(true);
@@ -1642,13 +1691,13 @@ function App() {
   useEffect(() => {
     const el = historyRef.current;
     if (el && atBottomRef.current) el.scrollTop = el.scrollHeight;
-  }, [messages, thinking, status, resumeSessions, notice]);
+  }, [messages, thinking, status, resumeSessions, notice, costReadout]);
 
-  // Exception: the /clear confirmation asks a question, so it always scrolls
-  // into view, wherever the user happens to be.
+  // Exception: the /clear confirmation and the /cost reset confirmation each ask
+  // a question, so they always scroll into view, wherever the user happens to be.
   useEffect(() => {
-    if (confirmClear) scrollToBottom(true);
-  }, [confirmClear]);
+    if (confirmClear || confirmResetCost) scrollToBottom(true);
+  }, [confirmClear, confirmResetCost]);
 
   // Close the overflow menu when clicking outside it.
   useEffect(() => {
@@ -2062,6 +2111,12 @@ function App() {
       .catch((e) => console.error("[imageConvert] probe error:", e));
   }, []);
 
+  // Load the all-time spend total and reset the per-launch session total. Must
+  // run before any API call so no early usage is dropped. Never blocks the UI.
+  useEffect(() => {
+    initCost().catch((e) => console.error("[cost] init failed:", e));
+  }, []);
+
   // Run a card-staged conversion: the user has picked the target format (and,
   // optionally, a quality) in the inline card, so batch-convert and drop a result
   // card in the chat. Every entry point (drag-drop, menu, natural language) funnels
@@ -2164,14 +2219,6 @@ function App() {
     }
   };
 
-  const openSettings = () => {
-    setRowMenuOpen(false);
-    setMessages((prev) => [
-      ...prev,
-      { role: "intern", text: "Settings are not available yet." },
-    ]);
-  };
-
   // Create the Outlook draft from the compose card's (edited) fields, then open
   // it in Outlook via its webLink. Throws on failure so the card can surface it.
   const handleCreateDraft = async (fields: { to: string; subject: string; body: string }) => {
@@ -2213,6 +2260,8 @@ function App() {
     setMessages([]);
     setInput("");
     setResumeSessions(null);
+    setCostReadout(null);
+    setConfirmResetCost(false);
     setNotice("");
   };
 
@@ -2222,6 +2271,8 @@ function App() {
     setRowMenuOpen(false);
     setNotice("");
     setConfirmClear(false);
+    setCostReadout(null);
+    setConfirmResetCost(false);
     stickToBottom();
     await persistCurrent();
     const all = await listSessions();
@@ -2245,6 +2296,8 @@ function App() {
     await setCurrentId(sess.id);
     setMessages(sess.messages);
     setResumeSessions(null);
+    setCostReadout(null);
+    setConfirmResetCost(false);
     setNotice("");
   };
 
@@ -2253,6 +2306,8 @@ function App() {
   const requestClear = () => {
     setRowMenuOpen(false);
     setResumeSessions(null);
+    setCostReadout(null);
+    setConfirmResetCost(false);
     setNotice("");
     if (messages.length === 0) {
       setNotice("Nothing to clear, this conversation is already empty.");
@@ -2277,28 +2332,57 @@ function App() {
     await setCurrentId(id);
     setMessages([]);
     setInput("");
+    setCostReadout(null);
+    setConfirmResetCost(false);
     setNotice("Conversation cleared. It was not saved.");
   };
 
+  // Open the inline token/spend readout (a fresh snapshot). `/cost reset` jumps
+  // straight to the reset confirmation; a bare `/cost` just shows the numbers,
+  // where a reset affordance is still one click away.
+  const openCost = (args?: string[]) => {
+    setRowMenuOpen(false);
+    setResumeSessions(null);
+    setConfirmClear(false);
+    setNotice("");
+    setCostReadout(costSnapshot());
+    setConfirmResetCost(args?.[0]?.toLowerCase() === "reset");
+  };
+
+  // Confirmed reset of the all-time counter. Session is left alone. Re-snapshot so
+  // the readout immediately shows the zeroed all-time total.
+  const doResetCost = async () => {
+    await resetAllTime();
+    setConfirmResetCost(false);
+    setCostReadout(costSnapshot());
+    setNotice("All-time spend reset. This session's total is unchanged.");
+  };
+
   // Slash-command registry. Extensible: add a name here and it works from the
-  // input box and shows up in the palette, no other wiring needed.
-  const commands: Record<string, { description: string; run: () => void | Promise<void> }> = {
+  // input box and shows up in the palette, no other wiring needed. `run` gets any
+  // trailing args (e.g. the "reset" in `/cost reset`); most commands ignore them.
+  const commands: Record<string, { description: string; run: (args?: string[]) => void | Promise<void> }> = {
     resume: { description: "Browse and reopen past conversations", run: openResumeList },
     new: { description: "Start a new conversation, saving this one", run: startNewConversation },
+    cost: { description: "Show token usage and spend", run: openCost },
     clear: { description: "Wipe this conversation without saving it", run: requestClear },
   };
 
   const runCommand = async (raw: string) => {
-    const name = raw.slice(1).split(/\s+/)[0].toLowerCase();
+    const parts = raw.slice(1).split(/\s+/);
+    const name = parts[0].toLowerCase();
+    const args = parts.slice(1);
     const cmd = commands[name];
     if (!cmd) {
       setResumeSessions(null);
       setConfirmClear(false);
+      setCostReadout(null);
+      setConfirmResetCost(false);
       const known = Object.keys(commands).map((c) => `/${c}`).join(", ");
       setNotice(`Unknown command: /${name}. Try ${known}.`);
       return;
     }
-    await cmd.run();
+    await cmd.run(args);
   };
 
   // Pick a command from the palette: clear the draft and run it.
@@ -2342,8 +2426,10 @@ function App() {
 
     setResumeSessions(null);
     setNotice("");
+    setCostReadout(null);
     // Sending a message answers the pending question: they did not mean to clear.
     setConfirmClear(false);
+    setConfirmResetCost(false);
     const newHistory: Message[] = [...messages, { role: "user", text }];
     setMessages(newHistory);
     setInput("");
@@ -2504,6 +2590,34 @@ function App() {
             </div>
           </div>
         )}
+        {costReadout && (
+          <div className="cost-readout">
+            <div className="cost-head">Token usage and spend</div>
+            <CostBlock title="This session" s={costReadout.session} />
+            <CostBlock title="All time" s={costReadout.allTime} />
+            {confirmResetCost ? (
+              <div className="cost-reset confirm">
+                <span className="confirm-text">
+                  Reset the all-time total? This cannot be undone.
+                </span>
+                <div className="confirm-actions">
+                  <button className="confirm-btn danger" onClick={doResetCost}>
+                    Reset
+                  </button>
+                  <button className="confirm-btn" onClick={() => setConfirmResetCost(false)}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="cost-reset">
+                <button className="cost-reset-btn" onClick={() => setConfirmResetCost(true)}>
+                  Reset all-time
+                </button>
+              </div>
+            )}
+          </div>
+        )}
         {notice && <div className="notice">{notice}</div>}
         {convertQueue && convertQueue.paths.length > 0 && (
           <ConvertPicker
@@ -2612,10 +2726,6 @@ function App() {
                 <span className={`toggle-pill${alsoToast ? " on" : ""}`}>
                   {alsoToast ? "On" : "Off"}
                 </span>
-              </button>
-              <div className="row-menu-sep" />
-              <button className="row-menu-item" onClick={openSettings}>
-                <IconSettings /> Settings
               </button>
             </div>
           )}
