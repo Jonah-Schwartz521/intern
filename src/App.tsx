@@ -6,11 +6,6 @@ import {
 } from "@tauri-apps/plugin-global-shortcut";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import {
-  isPermissionGranted,
-  requestPermission,
-  sendNotification,
-} from "@tauri-apps/plugin-notification";
 import { Command } from "@tauri-apps/plugin-shell";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import ReactMarkdown from "react-markdown";
@@ -46,6 +41,12 @@ import {
   type ConvertResult,
 } from "./imageConvert";
 import { isSupportedLang, highlightCode } from "./highlight";
+import {
+  initReminders,
+  createReminder,
+  getAlsoShowToast,
+  setAlsoShowToast,
+} from "./reminders";
 import {
   assembleContextForRequest,
   addFiles,
@@ -415,40 +416,6 @@ function pickModel(userText: string): string {
   return longish || multiStep || reasoningWords || emailDraft ? OPUS : HAIKU;
 }
 
-async function scheduleReminderTask(text: string, due: Date): Promise<string> {
-  const taskName = `InternReminder_${due.getTime()}`;
-
-  const hh = String(due.getHours()).padStart(2, "0");
-  const mm = String(due.getMinutes()).padStart(2, "0");
-  const startTime = `${hh}:${mm}`;
-  const startDate = `${String(due.getMonth() + 1).padStart(2, "0")}/${String(
-    due.getDate()
-  ).padStart(2, "0")}/${due.getFullYear()}`;
-
-  const safeText = text.replace(/"/g, "").slice(0, 200);
-  const trCommand = `msg * ${safeText}`;
-
-  const out = await Command.create("schtasks", [
-    "/create",
-    "/tn",
-    taskName,
-    "/tr",
-    trCommand,
-    "/sc",
-    "once",
-    "/st",
-    startTime,
-    "/sd",
-    startDate,
-    "/f",
-  ]).execute();
-
-  if (out.code !== 0) {
-    throw new Error(`schtasks failed (code ${out.code}): ${out.stderr}`);
-  }
-  return taskName;
-}
-
 async function searchFiles(query: string): Promise<string> {
   const safeQuery = query.replace(/'/g, "").slice(0, 100);
 
@@ -473,17 +440,6 @@ async function searchFiles(query: string): Promise<string> {
   return `Found these files:\n${results}`;
 }
 
-async function fireNotification(text: string) {
-  let granted = await isPermissionGranted();
-  if (!granted) {
-    const perm = await requestPermission();
-    granted = perm === "granted";
-  }
-  if (granted) {
-    sendNotification({ title: "Splerm reminder", body: text });
-  }
-}
-
 async function runTool(name: string, input: any): Promise<string> {
   if (name === "create_reminder") {
     const due = new Date(input.due_iso);
@@ -493,17 +449,20 @@ async function runTool(name: string, input: any): Promise<string> {
       return `Could not understand the time "${input.due_iso}".`;
     }
 
-    if (due.getTime() <= now.getTime()) {
-      await fireNotification(input.text);
-      return `That time has passed, so I reminded you now: "${input.text}".`;
+    try {
+      // App-managed: persist + arm an in-app timer. When it comes due (or right
+      // now, if already past) a sticky-note window pops up and stays until
+      // dismissed. Notes survive restarts and reopen flagged overdue if the app
+      // was closed at due time.
+      await createReminder(input.text, due.getTime());
+    } catch (e) {
+      return `Could not set the reminder: ${e instanceof Error ? e.message : String(e)}`;
     }
 
-    try {
-      await scheduleReminderTask(input.text, due);
-      return `Reminder scheduled: "${input.text}" for ${due.toLocaleString()}. It will fire even if Splerm is closed.`;
-    } catch (e) {
-      return `Could not schedule the reminder: ${e instanceof Error ? e.message : String(e)}`;
+    if (due.getTime() <= now.getTime()) {
+      return `That time has passed, so I put the reminder on your desktop now: "${input.text}".`;
     }
+    return `Reminder set: "${input.text}" for ${due.toLocaleString()}. A sticky note will pop up on your desktop when it is due.`;
   }
 
   if (name === "search_files") {
@@ -1085,6 +1044,12 @@ const IconLayout = () => (
     <path d="M15 4v16" />
   </svg>
 );
+const IconBell = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M10 5a2 2 0 1 1 4 0a7 7 0 0 1 4 6v3a4 4 0 0 0 2 3h-16a4 4 0 0 0 2 -3v-3a7 7 0 0 1 4 -6" />
+    <path d="M9 17v1a3 3 0 0 0 6 0v-1" />
+  </svg>
+);
 // Inline email compose card. Prefilled from Claude's draft; the user edits the
 // fields here and the edited values are what get sent to createDraft.
 function ComposeCard({
@@ -1497,6 +1462,9 @@ function App() {
   // Which edge the panel docks to (user setting, persisted). Drives the window
   // geometry (via dock.ts) and the CSS orientation (via the data-dock attribute).
   const [dockEdge, setDock] = useState<DockEdge>(DEFAULT_DOCK_EDGE);
+  // Whether a reminder also pings a one-time toast when its sticky note fires.
+  // Mirrors the persisted reminders.ts setting; default on.
+  const [alsoToast, setAlsoToast] = useState(true);
   // Read by the global Esc handler so it can defer to the command palette's own
   // Esc (which closes the palette) instead of dismissing the whole panel.
   const paletteOpenRef = useRef(false);
@@ -1707,6 +1675,23 @@ function App() {
   useEffect(() => {
     loadDockEdge().then(setDock).catch((e) => console.error("dock load failed:", e));
   }, []);
+
+  // Restore reminders on launch: reopen undismissed sticky notes, fire anything
+  // that came due while Splerm was closed (flagged overdue), re-arm the rest, and
+  // start listening for dismiss/snooze events from the note windows. Also sync
+  // the toast setting into UI state. Runs once; the main webview stays mounted
+  // (window just hidden), so its timers keep firing while the panel is dismissed.
+  useEffect(() => {
+    initReminders()
+      .then(() => setAlsoToast(getAlsoShowToast()))
+      .catch((e) => console.error("reminder init failed:", e));
+  }, []);
+
+  const toggleToast = async () => {
+    const next = !alsoToast;
+    setAlsoToast(next);
+    await setAlsoShowToast(next);
+  };
 
   // Tell the CSS which edge we dock to; it picks the round-inner-corners side and
   // the slide direction off this. Re-runs when the setting changes.
@@ -2616,6 +2601,18 @@ function App() {
                   </button>
                 ))}
               </div>
+              <div className="row-menu-sep" />
+              <button
+                className="row-menu-item toggle-item"
+                role="switch"
+                aria-checked={alsoToast}
+                onClick={toggleToast}
+              >
+                <IconBell /> Also show toast
+                <span className={`toggle-pill${alsoToast ? " on" : ""}`}>
+                  {alsoToast ? "On" : "Off"}
+                </span>
+              </button>
               <div className="row-menu-sep" />
               <button className="row-menu-item" onClick={openSettings}>
                 <IconSettings /> Settings

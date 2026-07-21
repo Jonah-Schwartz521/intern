@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "notes",
+  "description": "Capability for the sticky-note reminder windows (label note-*). They read/write their reminder record via the store, drag via a tauri drag region, emit dismiss/snooze events to the main window, and close themselves.",
+  "windows": ["note-*"],
+  "permissions": [
+    "core:default",
+    "store:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-close",
+    "core:window:allow-set-focus",
+    "core:window:allow-set-position",
+    "core:window:allow-show"
+  ]
+}

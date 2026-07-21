@@ -10,7 +10,7 @@ Living log of what is built and what is next. Update at the end of every session
 - [x] Global hotkey (Ctrl+Shift+Space) + window summoning, tray residence, close-to-tray
 - [x] Minimal chat UI (input + history), Markdown-rendered replies, custom frameless titlebar
 - [x] Claude API client (HTTP) + intent routing (Haiku default, Opus escalation) + prompt caching
-- [x] Reminders (Windows Task Scheduler via schtasks)
+- [x] Reminders (app-managed, surface as desktop sticky notes; was Task Scheduler schtasks)
 - [x] File search + open (PowerShell Get-ChildItem, opener plugin)
 - [x] Outlook auth (Microsoft Graph, PKCE, personal account, /consumers endpoint)
 - [x] Calendar: list / create / update / delete events (Graph)
@@ -126,6 +126,20 @@ Verified working end to end in the GUI (real ffmpeg, real PNG -> WEBP into Downl
 - [x] **Drag-drop listener fixed anyway** (was on `getCurrentWindow`, now `getCurrentWebview().onDragDropEvent`, the correct target in Tauri 2) so it works on machines that allow OS drops; here it is moot.
 - [x] **ffmpeg dev-resolution fixed.** Under `tauri dev` the `$RESOURCE` copy of `ffmpeg.exe` can be missing; `imageConvert.ts` now probes `ffmpeg-run` (bundled) then `ffmpeg-run-dev` / `ffmpeg-run-dev-root` (in-tree source relative to the working dir) and caches the first that runs, logging the resolved path + existence at startup.
 - [x] **Capabilities added:** `fs:allow-mkdir` + widened `fs:allow-write-file` (`$TEMP/splerm-conv/*`), `core:path:default` (for `tempDir`/`downloadDir`/`resolveResource`), and the two `ffmpeg-run-dev*` shell entries. `tsc` passes.
+
+## Done: desktop sticky-note reminders
+
+Reminders moved from a fire-and-forget `schtasks msg*` box to an app-managed model that surfaces each due reminder as a persistent desktop sticky note. Pure Tauri (runtime `WebviewWindow` + store + cross-window events), no Rust. `tsc --noEmit` + `vite build` pass; NOT yet run in the GUI.
+
+- [x] **App-managed firing (replaces schtasks).** `create_reminder` now persists a record to `reminders.json` and arms an in-app `setTimeout` (via `src/reminders.ts`) instead of scheduling a Task Scheduler job. At due time (or immediately, if already past) it opens a sticky note. Removed `scheduleReminderTask` and the old `fireNotification` from App.tsx. Tradeoff (approved): reminders now fire only while Splerm runs, which, being an autostart tray app, is effectively always; ones that come due while fully closed show as overdue on next launch.
+- [x] **Sticky note window.** A new borderless `WebviewWindow` (label `note-<id>`), `alwaysOnTop`, `skipTaskbar`, non-resizable, 240x210, warm amber/copper styling (`src/StickyNote.{tsx,css}`). Shows the reminder text, "Set for <time>", an overdue kicker when applicable, a dismiss (x), and a Snooze 10m button. Whole surface is a `data-tauri-drag-region`.
+- [x] **Note-only route.** `main.tsx` branches on `?note=<id>` / `?note=pile`: dynamic-imports `StickyNote` for note windows, `App` otherwise. Confirmed in the build output the note window loads a ~2.4 kB StickyNote chunk + reminders (28 kB), NOT the 1.36 MB App chunk.
+- [x] **Position memory.** Each note listens to `onMoved` (debounced) and writes its physical position to its record; on reopen it is restored there (create-hidden -> setPosition -> show to avoid a flash).
+- [x] **Persistence + overdue.** Fired-but-undismissed records persist. `initReminders()` on launch reopens undismissed notes, fires any pending reminder whose due time passed while closed (flagged **overdue**), re-arms the rest, and starts listening for note events. Dismiss deletes the record and closes the window (guarded so it never reappears).
+- [x] **Cascade + soft cap of 6.** Individual notes occupy up to 6 tracked slots, cascaded from the work-area top-right. Beyond 6, extra active reminders collapse into one `note-pile` window listing them (each row dismissible); `console.warn` logs the collapse. Dismissing an individual note promotes the oldest pile item into the freed slot; the pile closes when it empties. Pile renders from an event payload, so it never reads another window's store.
+- [x] **Toast kept as a one-time ping.** At fire, if the "Also show toast" setting is on (default on, persisted in `reminders.json`), one `sendNotification` fires. Re-surfacing a persisted note on launch does NOT re-toast. Toggle added to the `···` overflow menu.
+- [x] **Capabilities.** New `capabilities/notes.json` scoped to `windows: ["note-*"]` (store, drag, close, set-focus, set-position, show). Added `core:webview:allow-create-webview-window` + `core:window:allow-close` to the main window's capabilities. No `tauri.conf.json` window changes (notes are created at runtime), no new deps.
+- [x] **NOT verified in the running GUI.** Capability validation happens at `tauri dev`/`build` (not tsc/vite), and the multi-window behavior (fire, drag-persist, overdue-on-launch, snooze, dismiss, pile) needs a real run. Confirm on next `npm run tauri dev`.
 
 ## Next Up
 

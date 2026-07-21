@@ -15,6 +15,7 @@
     "global-shortcut:allow-unregister-all",
     "core:window:allow-hide",
     "core:window:allow-show",
+    "core:window:allow-close",
     "core:window:allow-set-focus",
     "core:window:allow-set-position",
     "core:window:allow-set-size",

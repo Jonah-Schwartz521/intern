@@ -36,6 +36,12 @@ body {
   flex-direction: column;
   height: 100vh;
   background: var(--bg);
+  /* Our own outline, replacing the native window shadow (turned off in
+     tauri.conf: it lingered for a beat after hide because the DWM paints it
+     outside our transformed content). This border lives on .container, the
+     element that slides, so it moves out with the panel and vanishes cleanly on
+     hide instead of lingering. box-sizing: border-box keeps the size unchanged. */
+  border: 1px solid #3a332c;
   /* Clip the panel content to the rounded inner corners below. */
   overflow: hidden;
   /* Slide the whole panel in from / out to the docked edge. Transform only, so
@@ -390,6 +396,27 @@ body {
 }
 
 .dock-seg-btn.active {
+  color: var(--copper);
+  border-color: var(--copper);
+}
+
+/* Toast toggle in the ... menu. The state pill reads via copper text + border
+   when on (no fill), matching the segmented control's no-background approach. */
+.toggle-item {
+  justify-content: flex-start;
+}
+
+.toggle-pill {
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-family: var(--sans);
+  font-size: 11px;
+}
+
+.toggle-pill.on {
   color: var(--copper);
   border-color: var(--copper);
 }

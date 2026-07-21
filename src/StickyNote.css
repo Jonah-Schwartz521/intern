@@ -1,0 +1,178 @@
+/* Sticky-note window styling. This is a brand-new, isolated window (not the
+   docked panel), and the amber/copper "sticky" look was explicitly requested, so
+   the background/overflow rules here are the sanctioned exception to the app's
+   reserved-CSS-prop rule. The note fills the whole (opaque, non-transparent)
+   window edge to edge; a copper top strip gives it the sticky feel without
+   needing a transparent window for rounded corners. */
+
+:root {
+  --note-copper: #c07840;
+  --note-copper-soft: #d79a63;
+  --note-alert: #d9776b;
+  --note-text: #ece4d8;
+  --note-dim: #a9a096;
+  --note-border: #3a2f24;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  color: var(--note-text);
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  /* Matches the note surface so no seam shows around the fill. */
+  background: #221b14;
+  user-select: none;
+  cursor: default;
+}
+
+.note {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: linear-gradient(155deg, #2a2016 0%, #1d1712 100%);
+  border-top: 3px solid var(--note-copper);
+  overflow: hidden;
+}
+
+.note.overdue {
+  border-top-color: var(--note-alert);
+}
+
+.note-loading {
+  border-top-color: var(--note-border);
+}
+
+.note-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 6px;
+}
+
+.note-kicker {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--note-copper);
+}
+
+.note.overdue .note-kicker,
+.pile-row.overdue .pile-row-time {
+  color: var(--note-alert);
+}
+
+.note-x {
+  border: none;
+  background: transparent;
+  color: var(--note-dim);
+  font-size: 20px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.note-x:hover {
+  color: var(--note-text);
+}
+
+.note-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 4px 14px 8px;
+  overflow-y: auto;
+}
+
+.note-text {
+  font-size: 16px;
+  line-height: 1.35;
+  color: var(--note-text);
+  word-break: break-word;
+}
+
+.note-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px 12px;
+  border-top: 1px solid var(--note-border);
+}
+
+.note-time {
+  font-family: "Cascadia Code", "Consolas", ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--note-dim);
+}
+
+.note-snooze {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border: 1px solid var(--note-copper);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--note-copper);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.note-snooze:hover {
+  color: #fff;
+  border-color: var(--note-copper-soft);
+  background: rgba(192, 120, 64, 0.16);
+}
+
+/* ---- Pile window ---- */
+.pile-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 8px 8px;
+}
+
+.pile-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--note-border);
+}
+
+.pile-row:last-child {
+  border-bottom: none;
+}
+
+.pile-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pile-row-text {
+  font-size: 13px;
+  color: var(--note-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pile-row-time {
+  font-family: "Cascadia Code", "Consolas", ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--note-dim);
+}
